@@ -19,6 +19,8 @@ library(statcomp)
 library(grid)
 library(gridExtra)
 
+library(Hmisc)
+
 # functions
 
 # return gene abundances

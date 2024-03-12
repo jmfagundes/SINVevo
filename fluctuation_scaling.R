@@ -20,8 +20,8 @@ sudden.mtx <- lapply(setNames(1:9, nm = c(2, 5, 6,
 
 # fit SNPs frequencies to Taylor's law
 
-gradual.TL <- fit.TL(gradual.mtx, zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = TRUE)
-sudden.TL <- fit.TL(sudden.mtx, zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = TRUE)
+gradual.TL <- fit.TL(gradual.mtx, zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = FALSE)
+sudden.TL <- fit.TL(sudden.mtx, zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = FALSE)
 
 # plot parameters
 
@@ -33,50 +33,20 @@ ggplot(snps.TL.params, aes(V, beta, color = data)) + geom_point()
 # Taylor's plot
 
 plot.power_law(gradual.TL$log_log.mean_sd,
-               gradual.TL$log_log.mean_sd %>%
-                 lapply(function(x) setNames(rownames(x) %>%
-                                               gsub("[A-Z+-]*", "", .) %>% gsub("\\*", "", .) %>% as.numeric(),
-                                             nm = rownames(x))),
-               metadata.range = c(0, 11703), legend.title = "position", l10 = TRUE) +
+               gradual.mtx %>% calc.0_rate(),
+               metadata.range = c(0, 1), legend.title = "0 rate", l10 = TRUE) +
   ggtitle("gradual") + xlab("mean (log)") + ylab("standard deviation (log)") +
-  geom_density_2d(color = "tomato")
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red")
 
 plot.power_law(sudden.TL$log_log.mean_sd,
-               sudden.TL$log_log.mean_sd %>%
-                 lapply(function(x) setNames(rownames(x) %>%
-                                               gsub("[A-Z+-]*", "", .) %>% gsub("\\*", "", .) %>% as.numeric(),
-                                             nm = rownames(x))),
-               metadata.range = c(0, 11703), legend.title = "position", l10 = TRUE) +
+               sudden.mtx %>% calc.0_rate(),
+               metadata.range = c(0, 1), legend.title = "0 rate", l10 = TRUE) +
   ggtitle("sudden") + xlab("mean (log)") + ylab("standard deviation (log)") +
-  geom_density_2d(color = "tomato", )
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red")
 
-# test if distances of points to the centroid are greater in sudden
-
-# calculate euclidean distances to centroid
-
-distances.to.centroid <- lapply(list(gradual = gradual.TL$log_log.mean_sd,
-                                     sudden = sudden.TL$log_log.mean_sd), function(x) {
-                                       lapply(x, function(y) {
-                                         
-                                         y <- y[!is.na(y$sd),]
-                                         
-                                         centroid <- list(mean = mean(y$mean),
-                                                          sd = mean(y$sd))
-                                         
-                                         distances <- data.frame(mean.dist = y$mean - centroid$mean,
-                                                                sd.dist = y$sd - centroid$sd)
-                                         sqrt((distances$mean.dist + distances$sd.dist)^2)
-                                       })
-                                     })
+# test if residuals are smaller in sudden
 
 # plot distributions
-
-lapply(distances.to.centroid, function(x) {
-  lapply(x, function(y) {
-    data.frame(dist = y)
-  }) %>% bind_rows(.id = "rep")
-}) %>% bind_rows(.id = "data") %>% ggplot(aes(dist, color = data, group = paste0(data, rep))) +
-  geom_density()
 
 # calculate entropy
 
@@ -137,5 +107,20 @@ entropy.TL$log_log.mean_sd %>%
   theme(legend.title = element_blank())
 
 # calculate entropy per ORF
+
+
+
+# reconstruct haplotypes from correlation matrices
+
+snps.cor <- lapply(list(gradual = gradual.mtx,
+                        sudden = sudden.mtx),
+                   lapply, function(x) {
+                     cor.mtx <- rcorr(t(x))
+                     ut <- upper.tri(cor.mtx$r)
+                     data.frame(SNP1 = rownames(cor.mtx$r)[row(cor.mtx$r)[ut]],
+                                SNP2 = rownames(cor.mtx$r)[col(cor.mtx$r)[ut]],
+                                cor = cor.mtx$r[ut],
+                                p = cor.mtx$P[ut])
+                     })
 
 
