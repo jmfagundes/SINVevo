@@ -99,7 +99,8 @@ entropy.mtx %>% lapply(function(x) {
 
 entropy.TL$log_log.mean_sd %>%
   bind_rows(.id = "title") %>%
-  mutate(mean = log10(exp(mean)), sd = log10(exp(sd))) %>% ggplot(aes(mean, sd, color = title)) +
+  mutate(mean = log10(exp(mean)), sd = log10(exp(sd))) %>%
+  ggplot(aes(mean, sd, color = title)) +
   ggtitle("entropy") + xlab("mean (log)") + ylab("standard deviation (log)") +
   geom_point() +
   geom_smooth(method = "lm",
@@ -110,17 +111,103 @@ entropy.TL$log_log.mean_sd %>%
 
 
 
-# reconstruct haplotypes from correlation matrices
+# reconstruct haplotypes from euclidean distance matrices calculated from a Pearson's coefficients matrix
+# only include SNPs present in at least two time points
 
 snps.cor <- lapply(list(gradual = gradual.mtx,
                         sudden = sudden.mtx),
                    lapply, function(x) {
-                     cor.mtx <- rcorr(t(x))
-                     ut <- upper.tri(cor.mtx$r)
-                     data.frame(SNP1 = rownames(cor.mtx$r)[row(cor.mtx$r)[ut]],
-                                SNP2 = rownames(cor.mtx$r)[col(cor.mtx$r)[ut]],
-                                cor = cor.mtx$r[ut],
-                                p = cor.mtx$P[ut])
-                     })
+                     x <- x[apply(x, 1, function(y) length(y[y > 0]) > 1),]
+                     sqrt(2 * (1 - cor(t(x))))
+                   })
 
+# estimate number of clusters
 
+n.clusters <- lapply(snps.cor, lapply, function(x) fviz_nbclust(x, pam, k.max = nrow(x) - 1)$plot_env$data$y %>% which.max())
+
+# generate clusters
+
+haplotypes <- mapply(function(x, y) {
+  mapply(function(i, j) {
+    pam(i, j)
+  }, x, y, SIMPLIFY = FALSE)
+}, snps.cor, n.clusters, SIMPLIFY = FALSE)
+
+# calculate frequency of each haplotype as the mean of its SNPs frequencies at each timepoint
+
+haplo.freqs <- mapply(function(x, y) {
+  mapply(function(i, j) {
+    
+    i <- i[apply(i, 1, function(z) length(z[z > 0]) > 1),] # only SNPs present at > 1 timepoints
+    
+    freqs <- apply(i, 2, function(z) {
+      aggregate(z, by = list(j$clustering), mean)$x
+    }) %>% as.data.frame()
+    
+    rownames(freqs) <- paste0("haplotype ", 1:nrow(freqs))
+    
+    freqs
+    
+  }, x, y, SIMPLIFY = FALSE)
+}, list(gradual = gradual.mtx,
+        sudden = sudden.mtx),
+haplotypes, SIMPLIFY = FALSE)
+
+# Taylor's law with haplotypes
+
+haplo.freqs.TL <- lapply(haplo.freqs, function(x) {
+  fit.TL(x, zero.rate.threshold = NULL, normalize = TRUE, remove.zeros = FALSE, min.rows = 10)
+})
+
+# plot
+
+haplo.TL.params <- rbind(haplo.freqs.TL$gradual$params[-1] %>% cbind(data = "gradual"),
+                         haplo.freqs.TL$sudden$params[-1] %>% cbind(data = "sudden"))
+
+ggplot(haplo.TL.params, aes(V, beta, color = data)) + geom_point()
+
+mapply(function(x, y, z) {
+  
+  plot.power_law(x$log_log.mean_sd,
+                 z %>% calc.0_rate(),
+                 metadata.range = c(0, 1), legend.title = "0 rate",
+                 l10 = TRUE) +
+    ggtitle(y) + xlab("mean (log)") + ylab("standard deviation (log)") +
+    geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red")
+}, haplo.freqs.TL, c("gradual", "sudden"), haplo.freqs,
+SIMPLIFY = FALSE)
+
+# entropy based on haplotype frequencies
+
+haplo.entropy.mtx <- lapply(haplo.freqs, function(x) lapply(x, function(y) {
+  apply(y, 2, function(z) {
+    
+    # remove haplotypes with frequency = 0 and normalize
+    
+    z <- z[z > 0]
+    z <- z / sum(z)
+    
+    -sum(lapply(z, function(z) z * log(z, 2)) %>% unlist())
+    
+  })
+}) %>% bind_rows() %>% as.data.frame() )
+
+haplo.entropy.TL <- fit.TL(haplo.entropy.mtx, normalize = FALSE)
+
+haplo.entropy.mtx %>% lapply(function(x) {
+  pivot_longer(x, -`0`, names_to = "time", values_to = "H")[-1]
+}) %>% bind_rows(.id = "data") %>%
+  ggplot(aes(time %>% factor(levels = c("4", "7", "10", "13", "16", "19", "22", "25")), H, color = data)) +
+  geom_boxplot() +
+  xlab("time") +
+  theme(legend.title = element_blank())
+
+haplo.entropy.TL$log_log.mean_sd %>%
+  bind_rows(.id = "title") %>%
+  mutate(mean = log10(exp(mean)), sd = log10(exp(sd))) %>%
+  ggplot(aes(mean, sd, color = title)) +
+  ggtitle("entropy") + xlab("mean (log)") + ylab("standard deviation (log)") +
+  geom_point() +
+  geom_smooth(method = "lm",
+              formula = y ~ x) +
+  theme(legend.title = element_blank())

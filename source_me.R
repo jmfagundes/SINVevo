@@ -5,10 +5,6 @@ library(writexl)
 library(readxl)
 library(segmented)
 library(ggpubr)
-library(Seurat)
-library(clusterProfiler)
-library(org.Hs.eg.db)
-library(GO.db)
 library(viridis)
 library(ggrepel)
 library(randtests)
@@ -20,6 +16,8 @@ library(grid)
 library(gridExtra)
 
 library(Hmisc)
+library(cluster)
+library(factoextra)
 
 # functions
 
@@ -49,6 +47,7 @@ normalize.cells <- function(mtx) {
 #' @param zero.rate.threshold Filter out genes with percentage of zeros higher than zero.rate.threshold
 #' @param normalize Boolean. Whether to transform the matrices to abundance matrix by performing cell size normalization
 #' @param remove.zeros Do not include zeros when calculating mean and standard deviation
+#' @param min.rows Skip matrix with number of elements (rows) < min.rows
 #' 
 #' @return A list of the Taylor's parameters, the linear models and the log-transformed mean and standard deviation data
 #' @export
@@ -58,7 +57,8 @@ fit.TL <- function(matrices,
                    prefix.xlsx = NULL,
                    zero.rate.threshold = .95,
                    normalize = TRUE,
-                   remove.zeros = FALSE) {
+                   remove.zeros = FALSE,
+                   min.rows = NULL) {
   
   params.tb <- data.frame(data = character(),
                           V = numeric(),
@@ -75,6 +75,7 @@ fit.TL <- function(matrices,
     gene.mtx <- matrices[[m]]
     
     if (is.null(ncol(gene.mtx))) next
+    if (!is.null(min.rows)) if (nrow(gene.mtx) < min.rows) next
     
     if (!is.null(prefix.xlsx)) {
       
