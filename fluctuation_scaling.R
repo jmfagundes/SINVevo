@@ -13,42 +13,14 @@ gradual.mtx <- lapply(setNames(1:9, nm = c(98, 101, 102,
 sudden.mtx <- lapply(setNames(1:9, nm = c(2, 5, 6,
                                           10, 11, 13,
                                           16, 19, 20) %>% as.character()), function(x) {
-  y <- read_xlsx("data/Sudden.xlsx", sheet = x) %>% as.data.frame()
-  rownames(y) <- y$'...1'
-  y[-1]
+                                            y <- read_xlsx("data/Sudden.xlsx", sheet = x) %>% as.data.frame()
+                                            rownames(y) <- y$'...1'
+                                            y[-1]
 })
 
-# fit SNPs frequencies to Taylor's law
-
-gradual.TL <- fit.TL(gradual.mtx, zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = FALSE)
-sudden.TL <- fit.TL(sudden.mtx, zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = FALSE)
-
-# plot parameters
-
-snps.TL.params <- rbind(gradual.TL$params[-1] %>% cbind(data = "gradual"),
-                        sudden.TL$params[-1] %>% cbind(data = "sudden"))
-
-ggplot(snps.TL.params, aes(V, beta, color = data)) + geom_point()
-
-# Taylor's plot
-
-plot.power_law(gradual.TL$log_log.mean_sd,
-               gradual.mtx %>% calc.0_rate(),
-               metadata.range = c(0, 1), legend.title = "0 rate", l10 = TRUE) +
-  ggtitle("gradual") + xlab("mean (log)") + ylab("standard deviation (log)") +
-  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red")
-
-plot.power_law(sudden.TL$log_log.mean_sd,
-               sudden.mtx %>% calc.0_rate(),
-               metadata.range = c(0, 1), legend.title = "0 rate", l10 = TRUE) +
-  ggtitle("sudden") + xlab("mean (log)") + ylab("standard deviation (log)") +
-  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red")
-
-# test if residuals are smaller in sudden
-
-# plot distributions
-
 # calculate entropy
+
+shannon.entropy <- function(freq.lst) -sum(lapply(freq.lst, function(x) x * log(x, 2)) %>% unlist())
 
 calc.entropy <- function(alt.freq.lst) {
   
@@ -73,7 +45,7 @@ calc.entropy <- function(alt.freq.lst) {
     
     snps <- alt.freq.lst[grepl(paste0("^", x, "[ACTG]|^", x, "\\*"), names(alt.freq.lst))]
     ref.freq <- 1 - sum(snps)
-    -sum(c(lapply(snps, function(y) y * log(y, 2)), ref.freq * log(ref.freq, 2)) %>% unlist())
+    shannon.entropy(c(snps, ref.freq))
   })
   entropy.sum <- sum(entropies %>% unlist())
   
@@ -89,35 +61,70 @@ entropy.mtx <- lapply(list(gradual = gradual.mtx,
 
 entropy.TL <- fit.TL(entropy.mtx, normalize = FALSE)
 
-entropy.mtx %>% lapply(function(x) {
+entropy.boxplot.gg <- entropy.mtx %>% lapply(function(x) {
   pivot_longer(x, -`0`, names_to = "time", values_to = "H")[-1]
 }) %>% bind_rows(.id = "data") %>%
   ggplot(aes(time %>% factor(levels = c("4", "7", "10", "13", "16", "19", "22", "25")), H, color = data)) +
   geom_boxplot() +
   xlab("time") +
-  theme(legend.title = element_blank())
+  theme(legend.title = element_blank()) +
+  labs(tag = "a")
 
-entropy.TL$log_log.mean_sd %>%
+entropy.TL.gg <- entropy.TL$log_log.mean_sd %>%
   bind_rows(.id = "title") %>%
   mutate(mean = log10(exp(mean)), sd = log10(exp(sd))) %>%
   ggplot(aes(mean, sd, color = title)) +
-  ggtitle("entropy") + xlab("mean (log)") + ylab("standard deviation (log)") +
+  xlab("mean (log)") + ylab("standard deviation (log)") +
   geom_point() +
   geom_smooth(method = "lm",
-              formula = y ~ x) +
-  theme(legend.title = element_blank())
+              formula = y ~ x,
+              show.legend = FALSE) +
+  theme(legend.title = element_blank())  +
+  labs(tag = "b")
+
+entropy.full.genome.gg <- ggarrange(entropy.boxplot.gg, entropy.TL.gg, ncol = 1,
+                                    legend.grob = get_legend(entropy.TL.gg), legend = "right")
 
 # calculate entropy per ORF
 
 
+# fit SNPs frequencies to Taylor's law
+
+gradual.TL <- fit.TL(gradual.mtx, zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = FALSE)
+sudden.TL <- fit.TL(sudden.mtx, zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = FALSE)
+
+# plot parameters
+
+snps.TL.params <- rbind(gradual.TL$params[-1] %>% cbind(data = "gradual"),
+                        sudden.TL$params[-1] %>% cbind(data = "sudden"))
+
+all.snps.TL.param.gg <- ggplot(snps.TL.params, aes(V, beta, color = data)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x)
+
+# Taylor's plot
+
+all.snps.TP.gradual.gg <- plot.power_law(gradual.TL$log_log.mean_sd,
+               gradual.mtx %>% calc.0_rate(),
+               metadata.range = c(0, 1), legend.title = "0 rate", l10 = TRUE) +
+  ggtitle("gradual") + xlab("mean (log)") + ylab("standard deviation (log)") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red")
+
+all.snps.TP.sudden.gg <- plot.power_law(sudden.TL$log_log.mean_sd,
+               sudden.mtx %>% calc.0_rate(),
+               metadata.range = c(0, 1), legend.title = "0 rate", l10 = TRUE) +
+  ggtitle("sudden") + xlab("mean (log)") + ylab("standard deviation (log)") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red")
 
 # reconstruct haplotypes from euclidean distance matrices calculated from a Pearson's coefficients matrix
-# only include SNPs present in at least two time points
+# only include SNPs present in at least n.time points
+
+n.time <- 2
 
 snps.cor <- lapply(list(gradual = gradual.mtx,
                         sudden = sudden.mtx),
                    lapply, function(x) {
-                     x <- x[apply(x, 1, function(y) length(y[y > 0]) > 1),]
+                     x <- x[apply(x, 1, function(y) length(y[y > 0]) >= n.time),]
                      sqrt(2 * (1 - cor(t(x))))
                    })
 
@@ -131,14 +138,35 @@ haplotypes <- mapply(function(x, y) {
   mapply(function(i, j) {
     pam(i, j)
   }, x, y, SIMPLIFY = FALSE)
-}, snps.cor, n.clusters, SIMPLIFY = FALSE)
+}, snps.cor, n.clusters,
+SIMPLIFY = FALSE)
+
+# plot SNPs colored by haplotype
+
+haplo.SNP.color.gg <- mapply(function(x, y) {
+  mapply(function(i, j) {
+    
+    i <- i %>% filter(rownames(i) %in% names(j$clustering))
+    
+    i %>% mutate(SNP = rownames(i), haplotype = paste0("haplotype ", j$clustering)) %>%
+      pivot_longer(-c(SNP, haplotype), names_to = "timepoint", values_to = "frequency")
+    
+  }, x, y, SIMPLIFY = FALSE) %>% bind_rows(.id = "rep")
+}, list(gradual = gradual.mtx,
+        sudden = sudden.mtx),
+haplotypes, SIMPLIFY = FALSE) %>% 
+  lapply(function(x) {
+    ggplot(x, aes(timepoint, frequency, color = haplotype)) + geom_point() +
+      facet_wrap(~rep) +
+      theme(legend.position = "none")
+    })
 
 # calculate frequency of each haplotype as the mean of its SNPs frequencies at each timepoint
 
 haplo.freqs <- mapply(function(x, y) {
   mapply(function(i, j) {
     
-    i <- i[apply(i, 1, function(z) length(z[z > 0]) > 1),] # only SNPs present at > 1 timepoints
+    i <- i[apply(i, 1, function(z) length(z[z > 0]) >= n.time),] # only SNPs present at >= n.time timepoints
     
     freqs <- apply(i, 2, function(z) {
       aggregate(z, by = list(j$clustering), mean)$x
@@ -151,12 +179,14 @@ haplo.freqs <- mapply(function(x, y) {
   }, x, y, SIMPLIFY = FALSE)
 }, list(gradual = gradual.mtx,
         sudden = sudden.mtx),
-haplotypes, SIMPLIFY = FALSE)
+haplotypes,
+SIMPLIFY = FALSE)
 
 # Taylor's law with haplotypes
+# don't normalize because of background mutations
 
 haplo.freqs.TL <- lapply(haplo.freqs, function(x) {
-  fit.TL(x, zero.rate.threshold = NULL, normalize = TRUE, remove.zeros = FALSE, min.rows = 10)
+  fit.TL(x, zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = FALSE, min.rows = 10)
 })
 
 # plot
@@ -164,7 +194,8 @@ haplo.freqs.TL <- lapply(haplo.freqs, function(x) {
 haplo.TL.params <- rbind(haplo.freqs.TL$gradual$params[-1] %>% cbind(data = "gradual"),
                          haplo.freqs.TL$sudden$params[-1] %>% cbind(data = "sudden"))
 
-ggplot(haplo.TL.params, aes(V, beta, color = data)) + geom_point()
+ggplot(haplo.TL.params, aes(V, beta, color = data)) + geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x)
 
 mapply(function(x, y, z) {
   
@@ -178,6 +209,7 @@ mapply(function(x, y, z) {
 SIMPLIFY = FALSE)
 
 # entropy based on haplotype frequencies
+# not accurate because background mutations are counted as different haplotypes
 
 haplo.entropy.mtx <- lapply(haplo.freqs, function(x) lapply(x, function(y) {
   apply(y, 2, function(z) {
@@ -187,7 +219,7 @@ haplo.entropy.mtx <- lapply(haplo.freqs, function(x) lapply(x, function(y) {
     z <- z[z > 0]
     z <- z / sum(z)
     
-    -sum(lapply(z, function(z) z * log(z, 2)) %>% unlist())
+    shannon.entropy(z)
     
   })
 }) %>% bind_rows() %>% as.data.frame() )
