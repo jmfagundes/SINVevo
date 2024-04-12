@@ -19,6 +19,24 @@ library(Hmisc)
 library(cluster)
 library(factoextra)
 
+# load matrices
+
+gradual.mtx <- lapply(setNames(1:9, nm = c(98, 101, 102,
+                                           106, 107, 109,
+                                           112, 115, 116) %>% as.character()), function(x) {
+                                             y <- read_xlsx("data/Gradual.xlsx", sheet = x) %>% as.data.frame()
+                                             rownames(y) <- y$'...1'
+                                             y[-1]
+                                           })
+
+sudden.mtx <- lapply(setNames(1:9, nm = c(2, 5, 6,
+                                          10, 11, 13,
+                                          16, 19, 20) %>% as.character()), function(x) {
+                                            y <- read_xlsx("data/Sudden.xlsx", sheet = x) %>% as.data.frame()
+                                            rownames(y) <- y$'...1'
+                                            y[-1]
+                                          })
+
 # functions
 
 # return gene abundances
@@ -48,6 +66,7 @@ normalize.cells <- function(mtx) {
 #' @param normalize Boolean. Whether to transform the matrices to abundance matrix by performing cell size normalization
 #' @param remove.zeros Do not include zeros when calculating mean and standard deviation
 #' @param min.rows Skip matrix with number of elements (rows) < min.rows
+#' @param sd.from.max Calculate max ~ sd from max
 #' 
 #' @return A list of the Taylor's parameters, the linear models and the log-transformed mean and standard deviation data
 #' @export
@@ -58,7 +77,8 @@ fit.TL <- function(matrices,
                    zero.rate.threshold = .95,
                    normalize = TRUE,
                    remove.zeros = FALSE,
-                   min.rows = NULL) {
+                   min.rows = NULL,
+                   sd.from.max = FALSE) {
   
   params.tb <- data.frame(data = character(),
                           V = numeric(),
@@ -106,18 +126,30 @@ fit.TL <- function(matrices,
       
       gene.mtx <- gene.mtx[!rownames(gene.mtx) %in% zero.rate.genes,]
     }
-    if (normalize) gene.mtx <- gene.mtx %>% normalize.cells
+    if (normalize) gene.mtx <- gene.mtx %>% normalize.cells()
     
     if (remove.zeros) {
-      mean_sd <- data.frame(mean = apply(gene.mtx, 1, function(x) mean(x[x > 0])),
-                            sd = apply(gene.mtx, 1, function(x) sd(x[x > 0])))
+      mean_sd <- data.frame(mean = apply(gene.mtx, 1, function(x) {
+        if (sd.from.max) max(x[x > 0])
+        else mean(x[x > 0])
+      }),
+      sd = apply(gene.mtx, 1, function(x) {
+        if (sd.from.max) sqrt(sum((x[x > 0] - max(x))**2)/(length(x) - 1))
+        else sd(x[x > 0])
+      }))
+      mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
     } else {
-      mean_sd <- data.frame(mean = rowMeans(gene.mtx),
-                            sd = apply(gene.mtx, 1, sd))
+      mean_sd <- data.frame(mean = apply(gene.mtx, 1, function(x) {
+        if (sd.from.max) max(x)
+        else mean(x)
+      }),
+      sd = apply(gene.mtx, 1, function(x) {
+        if (sd.from.max) sqrt(sum((x - max(x))**2)/(length(x) - 1))
+        else sd(x)
+      }))
       mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
     }
     
-
     log_log.mean_sd <- log(mean_sd)
     lm.log_log.mean_sd <- lm(sd ~ mean, data = log_log.mean_sd)
     fit.summary <- summary(lm.log_log.mean_sd)
@@ -384,9 +416,7 @@ plot.power_law <- function(log_log.mean_sd.matrices,
   
   if (is.null(genes.metadata.lst)) {
     
-    gg <- ggplot(log_log.df, aes(mean, sd)) +
-      facet_wrap(~title) +
-      geom_point(shape = 19, stroke = 0)
+    gg <- ggplot(log_log.df, aes(mean, sd))
     
   } else {
     
@@ -396,10 +426,14 @@ plot.power_law <- function(log_log.mean_sd.matrices,
     log_log.df$value <- value[match(paste0(log_log.df$title, log_log.df$genes),
                                     paste0(value$ind, value$genes)), "values"]
     
-    gg <- ggplot(log_log.df, aes(mean, sd, color = value)) +
-      facet_wrap(~title) +
-      geom_point(shape = 19, stroke = 0)
+    if (is.null(metadata.range)) log_log.df$value <- as.factor(log_log.df$value)
+    
+    gg <- ggplot(log_log.df, aes(mean, sd, color = value))
   }
+  
+  gg <- gg + facet_wrap(~title) +
+    geom_point(shape = 20, stroke = 0, size = .75)
+  
   if (!is.null(legend.title)) gg <- gg + labs(color = legend.title)
   else gg <- gg + theme(legend.title = element_blank())
   
@@ -535,6 +569,8 @@ calc.RSI <- function(rank.matrices,
         # also add p.value based on a survival function (1 - CDF) of the RSI rep distribution , i.e., the probability of finding a RSI value at least this high
         
         RSI.mtx$p.value.survival <- lapply(1:nrow(RSI.mtx), function(x) {
+          
+          if (RSI.mtx$RSI.boot[x] == 1) return(NaN)
           
           if (cdf.method == "ecdf") {
             
@@ -990,4 +1026,114 @@ fit.hurst_bin <- function(matrices, # col as cells/pseudotime rows as rank/abund
     hurst.fit[[gene]] <- H.lst
   }
   return(hurst.fit)
+}
+
+# filters for reconstructing haplotypes
+
+# only include SNPs present in at least n.time points
+n.time <- 1
+
+# filter SNPs that never reach freq.thresh
+freq.thresh <- .03
+
+#' apply.filter
+#' 
+#' Filters a frequency matrix
+#' 
+#' @param x Input matrix
+#' @param n.time Only include SNPs present in at least n.time times
+#' @param freq.thresh Filter SNPs that never reach freq.thresh
+#' @param rev Return SNPs below freq.thresh. Ignores n.time
+#' @param exact Boolean. Only include SNPs present exactly n.time times
+#' 
+#' @return A filtered matrix
+#' @export
+#' 
+#' @examples
+apply.filter <- function(x,
+                         n.time = 1,
+                         freq.thresh = 0,
+                         rev = FALSE,
+                         exact = FALSE) {
+  
+  if (!exact) above_n.time <- apply(x, 1, function(y) length(y[y > 0]) >= n.time)
+  else above_n.time <- apply(x, 1, function(y) length(y[y > 0]) == n.time)
+  
+  above_freq.thresh <- apply(x, 1, function(y) length(y[y >= freq.thresh]) > 0)
+  
+  if (!rev) return(x[above_n.time & above_freq.thresh,])
+  else return(x[!above_freq.thresh,])
+}
+
+
+#' fit.JL
+#' 
+#' Fit matrices in a list to Joint's law
+#' 
+#' @param matrices List of matrices
+#' @param zero.rate.threshold Filter out genes with percentage of zeros higher than zero.rate.threshold
+#' @param normalize Boolean. Whether to transform the matrices to abundance matrix by performing cell size normalization
+#' @param remove.zeros Do not include zeros when calculating mean and standard deviation
+#' @param min.rows Skip matrix with number of elements (rows) < min.rows
+#' 
+#' @return A list of the Joint's parameters, the linear models and the log-transformed mean and standard deviation data
+#' @export
+#' 
+#' @examples
+fit.JL <- function(matrices,
+                   zero.rate.threshold = .95,
+                   normalize = TRUE,
+                   remove.zeros = FALSE,
+                   min.rows = NULL) {
+  
+  params.tb <- data.frame(data = character(),
+                          V = numeric(),
+                          beta = numeric(),
+                          R.squared = numeric(),
+                          n.cells = numeric(),
+                          n.genes = numeric(),
+                          sparsity = numeric())
+  max_sd.lst <- list()
+  lm.lst <- list()
+  
+  for (m in matrices %>% names()) {
+    
+    gene.mtx <- matrices[[m]]
+    
+    if (is.null(ncol(gene.mtx))) next
+    if (!is.null(min.rows)) if (nrow(gene.mtx) < min.rows) next
+    if (!is.null(zero.rate.threshold)) {
+      
+      zero.rate.genes <- calc.0_rate(list(mtx = gene.mtx))$mtx
+      zero.rate.genes <- zero.rate.genes[zero.rate.genes > zero.rate.threshold] %>% names()
+      
+      gene.mtx <- gene.mtx[!rownames(gene.mtx) %in% zero.rate.genes,]
+    }
+    if (normalize) gene.mtx <- gene.mtx %>% normalize.cells
+    
+    if (remove.zeros) {
+      max_sd <- data.frame(max.time = apply(gene.mtx, 1, function(x) which.max(x[x > 0])),
+                           sd.from.max = apply(gene.mtx, 1, function(x) sqrt(sum(((x[x > 0]) - max(x))**2)/(length(x[x > 0]) - 1))))
+    } else {
+      max_sd <- data.frame(max.time = apply(gene.mtx, 1, function(x) which.max(x)),
+                           sd.from.max = apply(gene.mtx, 1, function(x) sqrt(sum((x - max(x))**2)/(length(x) - 1))))
+      max_sd <- max_sd[max_sd$max.time > 0 & max_sd$sd.from.max > 0,]
+    }
+    
+    lm.max_sd <- lm(sd.from.max ~ max.time, data = max_sd)
+    fit.summary <- summary(lm.max_sd)
+    
+    params.tb[nrow(params.tb) + 1,] <- list(m, fit.summary$coefficients[1] %>% exp(),
+                                            fit.summary$coefficients[2],
+                                            fit.summary$r.squared,
+                                            gene.mtx %>% ncol(),
+                                            max_sd %>% nrow(),
+                                            coop::sparsity(gene.mtx %>% as.matrix()))
+    max_sd.lst[[m]] <- max_sd
+    lm.lst[[m]] <- lm.max_sd
+  }
+  params.tb$model <- "LLR"
+  return(list(params = params.tb,
+              max_sd = max_sd.lst,
+              lm.max_sd = lm.lst))
 }
