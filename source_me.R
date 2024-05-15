@@ -26,7 +26,7 @@ gradual.mtx <- lapply(setNames(1:9, nm = c(98, 101, 102,
                                            112, 115, 116) %>% as.character()), function(x) {
                                              y <- read_xlsx("data/Gradual.xlsx", sheet = x) %>% as.data.frame()
                                              rownames(y) <- y$'...1'
-                                             y[-1]
+                                             y[-c(1,2)]
                                            })
 
 sudden.mtx <- lapply(setNames(1:9, nm = c(2, 5, 6,
@@ -34,7 +34,7 @@ sudden.mtx <- lapply(setNames(1:9, nm = c(2, 5, 6,
                                           16, 19, 20) %>% as.character()), function(x) {
                                             y <- read_xlsx("data/Sudden.xlsx", sheet = x) %>% as.data.frame()
                                             rownames(y) <- y$'...1'
-                                            y[-1]
+                                            y[-c(1,2)]
                                           })
 
 # functions
@@ -65,6 +65,7 @@ normalize.cells <- function(mtx) {
 #' @param zero.rate.threshold Filter out genes with percentage of zeros higher than zero.rate.threshold
 #' @param normalize Boolean. Whether to transform the matrices to abundance matrix by performing cell size normalization
 #' @param remove.zeros Do not include zeros when calculating mean and standard deviation
+#' @param analyze.fluctuation.only Only analyze the fluctuation of mutations that reach fixation (removes all zeros and ones then add one zero and one one)
 #' @param min.rows Skip matrix with number of elements (rows) < min.rows
 #' @param sd.from.max Calculate max ~ sd from max
 #' 
@@ -77,6 +78,7 @@ fit.TL <- function(matrices,
                    zero.rate.threshold = .95,
                    normalize = TRUE,
                    remove.zeros = FALSE,
+                   analyze.fluctuation.only = FALSE,
                    min.rows = NULL,
                    sd.from.max = FALSE) {
   
@@ -86,7 +88,8 @@ fit.TL <- function(matrices,
                           R.squared = numeric(),
                           n.cells = numeric(),
                           n.genes = numeric(),
-                          sparsity = numeric())
+                          sparsity = numeric(),
+                          model = character())
   log_log.mean_sd.lst <- list()
   lm.lst <- list()
 
@@ -138,6 +141,16 @@ fit.TL <- function(matrices,
         else sd(x[x > 0])
       }))
       mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
+      
+    } else if (analyze.fluctuation.only){
+      mean_sd <- data.frame(mean = apply(gene.mtx, 1, function(x) {
+        mean(c(x[x > 0 & x < 1], 0 ,1))
+      }),
+      sd = apply(gene.mtx, 1, function(x) {
+        sd(c(x[x > 0 & x < 1], 0 ,1))
+      }))
+      mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
+      
     } else {
       mean_sd <- data.frame(mean = apply(gene.mtx, 1, function(x) {
         if (sd.from.max) max(x)
@@ -159,11 +172,11 @@ fit.TL <- function(matrices,
                                             fit.summary$r.squared,
                                             gene.mtx %>% ncol(),
                                             log_log.mean_sd %>% nrow(),
-                                            coop::sparsity(gene.mtx %>% as.matrix()))
+                                            coop::sparsity(gene.mtx %>% as.matrix()),
+                                            "LLR")
     log_log.mean_sd.lst[[m]] <- log_log.mean_sd
     lm.lst[[m]] <- lm.log_log.mean_sd
   }
-  params.tb$model <- "LLR"
   return(list(params = params.tb,
               log_log.mean_sd = log_log.mean_sd.lst,
               lm.log_log.mean_sd = lm.lst))
@@ -981,7 +994,7 @@ fit.hurst <- function(matrices, # col as cells/pseudotime rows as rank/abundance
   hurst.fit <- list()
   
   if (is.null(gene.lst)) {
-    gene.lst <- lapply(matrices, rownames) %>% unlist() %>% unique()
+    gene.lst <- lapply(matrices, rownames) %>% unlist() %>% unique() %>% as.character()
   }
   
   for (gene in gene.lst) {

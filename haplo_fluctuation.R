@@ -108,4 +108,48 @@ haplo.rank <- haplo.freqs %>% lapply(function(x) process.rank(matrices = x, meth
 
 haplo.RSI <- haplo.rank %>% lapply(calc.RSI, shuffle.rep = 1000)
 
+# read CALDER output (clone proportion matrix)
+
+gradual.calder <- lapply(setNames(nm = c("98", "101", "102",
+                                         "106", "107", "109",
+                                         "112", "115", "116") %>% as.character()), function(x) {
+                                           y <- read.table(paste0("SF_results/calder/Gradual.", x, "/Gradual_soln1.csv"),
+                                                           sep = ",", row.names = 1, skip = 15, nrows = 8, fill = TRUE) %>% t()
+                                           y[is.na(y)] <- 0
+                                           y %>% as.data.frame()
+                                         })
+
+colnames(gradual.calder$`112`) <- c("4", "7", "10", "13", "16", "19", "22", "25")
+
+sudden.calder <- lapply(setNames(nm = c("2", "5", "6",
+                                        "10", "11", "13",
+                                        "16", "19", "20") %>% as.character()), function(x) {
+                                          y <- read.table(paste0("SF_results/calder/Sudden.", x, "/Sudden_soln1.csv"),
+                                                          sep = ",", row.names = 1, skip = 15, nrows = 8, fill = TRUE) %>% t()
+                                          y[is.na(y)] <- 0
+                                          y %>% as.data.frame()
+                                        })
+
+calder.TL <- list(gradual = gradual.calder,
+                  sudden = sudden.calder) %>% lapply(function(x) fit.TL(lapply(x, function(y) {
+                    y[rowSums(y) > 0,]
+                  }), normalize = FALSE, min.rows = 3))
+
+calder.TL %>% lapply(function(x) x$params) %>% bind_rows(.id = "treatment") %>%
+  ggplot(aes(V, beta, color = treatment)) + geom_point() + geom_smooth(method = "lm")
+
+calder.TL %>% lapply(function(x) x$log_log.mean_sd) %>% lapply(bind_rows, .id = "population") %>% bind_rows(.id = "treatment") %>%
+  ggplot(aes(mean, sd, color = population)) + geom_point() + geom_smooth(method = "lm", se = FALSE) + facet_wrap(~treatment)
+
+# pull variants together
+
+calder.cat <- list(gradual = bind_rows(gradual.calder),
+                   sudden = bind_rows(sudden.calder))
+
+calder.cat.TL <- fit.TL(calder.cat %>% lapply(function(x) x[rowSums(x) > 0,]),
+                        normalize = FALSE, min.rows = 3)
+
+calder.cat.TL$log_log.mean_sd %>% bind_rows(.id = "treatment") %>%
+  ggplot(aes(mean, sd, color = treatment)) + geom_point() + geom_smooth(method = "lm", se = FALSE)
+
 

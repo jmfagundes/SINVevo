@@ -44,6 +44,7 @@ entropy.mtx <- lapply(list(gradual = gradual.mtx,
 entropy.TL <- fit.TL(entropy.mtx, normalize = FALSE)
 
 entropy.boxplot.gg <- entropy.mtx %>% lapply(function(x) {
+  x$`0` <- 0
   pivot_longer(x, -`0`, names_to = "time", values_to = "H")[-1]
 }) %>% bind_rows(.id = "data") %>%
   ggplot(aes(time %>% factor(levels = c("4", "7", "10", "13", "16", "19", "22", "25")), H, color = data)) +
@@ -79,10 +80,12 @@ entropy.filter.mtx <- lapply(list(gradual = gradual.mtx %>% lapply(apply.filter,
 entropy.filter.TL <- fit.TL(entropy.filter.mtx, normalize = FALSE)
 
 entropy.filter.boxplot.gg <- entropy.filter.mtx %>% lapply(function(x) {
+  x$`0` <- 0
   pivot_longer(x, -`0`, names_to = "time", values_to = "H")[-1]
 }) %>% bind_rows(.id = "data") %>%
   ggplot(aes(time %>% factor(levels = c("4", "7", "10", "13", "16", "19", "22", "25")), H, color = data)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_dodge(width = .75)) +
   xlab("time") +
   theme(legend.title = element_blank()) +
   labs(tag = "a")
