@@ -90,7 +90,7 @@ all.snps.V.beta.scale <- lapply(list(gradual = TL.classic$TL$gradual$params,
 
 pipe.per_0 <- function(n = 1:8,
                        remove.zeros = FALSE,
-                       min.rows = 4,
+                       min.rows = 5,
                        sd.from.max = FALSE) {
   
   lapply(setNames(n, nm = as.character(n)), function(x) {
@@ -146,20 +146,6 @@ facet.V.beta.gg <- V.beta.per_0.tb %>%
   ggplot(aes(V, beta, color = n)) +
   geom_point(size = .5) + geom_smooth(method = "lm", se = FALSE, linewidth = .2) + facet_wrap(~treatment)
 
-# to check samples
-
-lapply(TL.per.zero, function(x) {
-  bind_rows(lapply(x$TL, function(y) y$params), .id = "treatment")
-}) %>% bind_rows(.id = "n") %>%
-  ggplot(aes(V, beta, color = n)) + geom_smooth(method = "lm", se = FALSE, linewidth = .2) +
-  geom_point(size = .5) + facet_wrap(~treatment) + geom_label(aes(label = data))
-
-joint.gg <- lapply(TL.per.zero, function(x) {
-  bind_rows(lapply(x$TL, function(y) y$params), .id = "treatment")
-}) %>% bind_rows(.id = "n") %>%
-  ggplot(aes(V, beta, color = n, linetype = treatment)) +
-  geom_smooth(method = "lm", se = FALSE)
-
 # where are the SNPs?
 
 location.SNPs.gg <- lapply(list(gradual = gradual.mtx,
@@ -201,10 +187,28 @@ combined.gg <- ggarrange(facet.V.beta.gg + labs(tag = "a") + theme(legend.positi
 
 ggsave("params_TL.pdf", combined.gg, width = 6.85, height = 6)
 
-# test for the effect of treatment + zero-rate + data
+# V and beta power relationship
 
-beta.lm <- lm(beta ~ treatment + n + data, V.beta.per_0.tb %>% mutate(n := as.numeric(n)))
-V.lm <- lm(V ~ treatment + n + data, V.beta.per_0.tb %>% mutate(n := as.numeric(n)))
+V.beta_log.per_0.tb <- V.beta.per_0.tb %>% dplyr::mutate(`V (log)` = log10(V), `beta (log)` = log10(beta))
+
+snps.taylor_log.gg <- V.beta_log.per_0.tb %>%
+  ggplot(aes(`V (log)`, `beta (log)`, color = n)) +
+  geom_point(size = .5) + geom_smooth(method = "lm", se = FALSE, linewidth = .2) + facet_wrap(~treatment)
+
+# test for the effect of treatment + zero-rate:param + data
+
+V.lm <- lm(V ~ treatment + n:beta + data , V.beta.per_0.tb %>% mutate(n := as.numeric(n)))
+beta.lm <- lm(beta ~ treatment + n:V + data, V.beta.per_0.tb %>% mutate(n := as.numeric(n)))
+
+V.beta.manova <- manova(cbind(V, beta) ~ treatment * n * data, V.beta.per_0.tb %>% mutate(n := as.numeric(n)))
+
+# test n = 8
+
+n.8.wilcox.V <- wilcox.test(V.beta.per_0.tb[V.beta.per_0.tb$treatment == "gradual" & V.beta.per_0.tb$n == 8,]$V,
+                            V.beta.per_0.tb[V.beta.per_0.tb$treatment == "sudden" & V.beta.per_0.tb$n == 8,]$V)
+
+n.8.wilcox.beta <- wilcox.test(V.beta.per_0.tb[V.beta.per_0.tb$treatment == "gradual" & V.beta.per_0.tb$n == 8,]$beta,
+                               V.beta.per_0.tb[V.beta.per_0.tb$treatment == "sudden" & V.beta.per_0.tb$n == 8,]$beta)
 
 # test if the V ~ beta slope is higher depending on host replacement regime
 
@@ -222,50 +226,21 @@ V.beta.slope.wilcox <- wilcox.test(slope ~ treatment,
                                    V.beta.slope.per_0.tb,
                                    paired = TRUE)
 
-# Taylor's law from the max
+# test if the V ~ beta POWER relationship slope is higher depending on host replacement regime
 
-TL.max <- pipe(gradual.mtx, sudden.mtx, FALSE, TRUE)
-TL.max$snps.gg <- lapply(TL.max$snps.gg, function(x) {
-  x + xlab("max (log)") + ylab("standard deviation of the max (log)") +
-    xlim(-2.2, 0) + ylim(-2.2, 0) +
-    theme(legend.position = "none") +
-    geom_smooth(aes(mean, sd), method = "lm", linetype = "dashed", se = FALSE, color = "black", linewidth = .2) +
-    scale_color_discrete(direction = -1)
-})
+V.beta_log.slope.per_0.tb <- lapply(setNames(nm = c("gradual", "sudden")), function(x) {
+  lapply(setNames(nm = 2:8), function(y) {
+    data <- V.beta_log.per_0.tb[V.beta_log.per_0.tb$n == y & V.beta_log.per_0.tb$treatment == x,]
+    slope <- summary(lm(`beta (log)` ~ `V (log)`, data))$coefficients[2]
+    data.frame(treatment = x, n = y, slope = slope)
+  }) %>% bind_rows()
+}) %>% bind_rows()
 
-# figures
+V.beta_log.slope.lm <- lm(slope ~ n + treatment, V.beta_log.slope.per_0.tb)
 
-snps.taylor.max.gg <- ggarrange(TL.max$snps.gg$gradual + theme(axis.title = element_blank()),
-                                TL.max$snps.gg$sudden + theme(axis.title = element_blank(),
-                                                              axis.ticks.y = element_blank(),
-                                                              axis.text.y = element_blank()),
-                                nrow = 1,
-                                common.legend = TRUE,
-                                legend.grob = get_legend(facet.V.beta.gg + geom_point(shape = 15, size = 6) +
-                                                           theme(legend.direction = "horizontal") + guides(colour = guide_legend(nrow = 1))),
-                                legend = "top", widths = c(1, .94)) %>% annotate_figure(left = "standard deviation of the max (log)", bottom = "max (log)")
-
-TL.max.per.zero <- pipe.per_0(sd.from.max = TRUE)
-
-max.facet.V.beta.gg <- lapply(TL.max.per.zero, function(x) {
-  bind_rows(lapply(x$TL, function(y) y$params), .id = "treatment")
-}) %>% bind_rows(.id = "n") %>%
-  ggplot(aes(V, beta, color = n)) +
-  geom_point(size = .5) + geom_smooth(method = "lm", se = FALSE, linewidth = .2) + facet_wrap(~treatment)
-
-# to check samples
-
-lapply(TL.max.per.zero, function(x) {
-  bind_rows(lapply(x$TL, function(y) y$params), .id = "treatment")
-}) %>% bind_rows(.id = "n") %>%
-  ggplot(aes(V, beta, color = n)) + geom_smooth(method = "lm", se = FALSE, linewidth = .2) +
-  geom_point(size = .5) + facet_wrap(~treatment) + geom_label(aes(label = data))
-
-max.joint.gg <- lapply(TL.max.per.zero, function(x) {
-  bind_rows(lapply(x$TL, function(y) y$params), .id = "treatment")
-}) %>% bind_rows(.id = "n") %>%
-  ggplot(aes(V, beta, color = n, linetype = treatment)) +
-  geom_smooth(method = "lm", se = FALSE)
+V.beta_log.slope.wilcox <- wilcox.test(slope ~ treatment,
+                                       V.beta_log.slope.per_0.tb,
+                                       paired = TRUE)
 
 # with no zero
 
@@ -292,8 +267,49 @@ snps.taylor.no_zero.gg <- ggarrange(TL.no_zero$snps.gg$gradual + theme(axis.titl
                                                                theme(legend.direction = "horizontal") + guides(colour = guide_legend(nrow = 1))),
                                     legend = "top", widths = c(1, .94)) %>% annotate_figure(left = "standard deviation (log)", bottom = "mean (log)")
 
-TL.max.no_zero <- pipe(gradual.mtx, sudden.mtx, TRUE, TRUE)
-TL.max.no_zero$snps.gg <- lapply(TL.max.no_zero$snps.gg, function(x) x + xlab("max (log)") + ylab("standard deviation of the max (log)"))
+# pull all alleles together
+
+cat.mtx <- lapply(list(gradual = gradual.mtx,
+                       sudden = sudden.mtx), function(x) {
+                         mapply(function(y, z) {
+                           rownames(y) <- paste0(z, "_", rownames(y))
+                           y
+                         }, x, names(x), SIMPLIFY = FALSE) %>% bind_rows()
+                       })
+
+cat.TL <- fit.TL(cat.mtx,
+                 zero.rate.threshold = NULL, normalize = FALSE)
+
+cat.TL.per_0 <- lapply(setNames(1:8, nm = as.character(1:8)), function(x) {
+  
+  # fit SNPs frequencies to Taylor's law
+  
+  TL <- fit.TL(cat.mtx %>% lapply(apply.filter, x, exact = TRUE),
+               zero.rate.threshold = NULL, normalize = FALSE,)
+  
+  list(TL = TL)
+})
+
+cat.TL.gg <- plot.power_law(cat.TL$log_log.mean_sd,
+               cat.mtx %>% calc.0_rate(),
+               metadata.range = NULL, legend.title = "0 rate", l10 = TRUE) +
+  xlab("mean (log)") + ylab("standard deviation (log)") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE)
+
+cat.TL.params.gg <- cat.TL.per_0 %>% lapply(function(x) x$TL$params) %>% bind_rows(.id = "n") %>%
+  ggplot(aes(V, beta, color = n, shape = data)) + geom_point()
+
+cat.wilcox.V <- wilcox.test(cat.TL.per_0 %>% lapply(function(x) x$TL$params) %>%
+                              bind_rows(.id = "n") %>% filter(data == "gradual") %>% dplyr::select(V) %>% unlist(),
+                            cat.TL.per_0 %>% lapply(function(x) x$TL$params) %>%
+                              bind_rows(.id = "n") %>% filter(data == "sudden") %>% dplyr::select(V) %>% unlist(),
+                            paired = TRUE)
+
+cat.wilcox.beta <- wilcox.test(cat.TL.per_0 %>% lapply(function(x) x$TL$params) %>%
+                                 bind_rows(.id = "n") %>% filter(data == "gradual") %>% dplyr::select(beta) %>% unlist(),
+                               cat.TL.per_0 %>% lapply(function(x) x$TL$params) %>%
+                                 bind_rows(.id = "n") %>% filter(data == "sudden") %>% dplyr::select(beta) %>% unlist(),
+                               paired = TRUE)
 
 # pull mutations that reach fixation together by treatment
 
@@ -323,38 +339,11 @@ fix.TL.per_0 <- lapply(setNames(1:8, nm = as.character(1:8)), function(x) {
   list(TL = TL)
 })
 
-plot.power_law(fix.TL$log_log.mean_sd,
+fix.TL.per_0.gg <- plot.power_law(fix.TL$log_log.mean_sd,
                fix.mtx %>% calc.0_rate(),
                metadata.range = NULL, legend.title = "0 rate", l10 = TRUE) +
   xlab("mean (log)") + ylab("standard deviation (log)") +
   geom_smooth(method = "lm", formula = y ~ x, se = FALSE)
-
-# rank stability, all SNPs
-
-#all.snps.rank <- lapply(list(gradual = gradual.mtx,
-#                             sudden = sudden.mtx),
-#                        function(x) process.rank(matrices = x, method = "random"))
-#
-#all.snps.RSI <- all.snps.rank %>% lapply(calc.RSI, shuffle.rep = 1000)
-#
-#all.snps.RSI.gg <- mapply(function(x, y) {
-#  
-#  x <- x %>% bind_rows(.id = "replicate")
-#  
-#  ggplot(x, aes(RSI, RSI.boot)) +
-#    xlab("RSI") + ylab("PSI") +
-#    geom_point(aes(color = ifelse(p.adjust.survival < .05, "a", "b")), size = 1) +
-#    facet_wrap(~replicate) +
-#    theme(legend.position = "none") +
-#    scale_color_manual(values = c("tomato", "grey60")) +
-#    ggtitle(y)
-#},
-#all.snps.RSI,
-#list("gradual", "sudden"), SIMPLIFY = FALSE)
-
-# Hurst SNP location. Are they more random on the genomes depending on treatment?
-
-# unknown contig length, set to max (11685)
 
 # get positions all mutations
 
@@ -369,8 +358,8 @@ mut.pos <- list(gradual = gradual.mtx,
                   }) %>% t() %>% as.data.frame()
                 })
 
-h.exp <- list(gradual = fit.hurst(mut.pos$gradual, d = 2000) %>% bind_rows(.id = "time"),
-              sudden = fit.hurst(mut.pos$sudden, d = 2000) %>% bind_rows(.id = "time")) %>% bind_rows(.id = "treatment")
+h.exp <- list(gradual = fit.hurst(mut.pos$gradual, d = 1950) %>% bind_rows(.id = "time"),
+              sudden = fit.hurst(mut.pos$sudden, d = 1950) %>% bind_rows(.id = "time")) %>% bind_rows(.id = "treatment")
 
 h.exp.gg <- ggplot(h.exp, aes(time %>% factor(levels = time %>% unique()), He, color = treatment)) +
   geom_boxplot(outlier.shape = NA) +
@@ -454,10 +443,32 @@ h.exp.pop.wilcox <- wilcox.test(He ~ data,
                                 h.exp.pop,
                                 paired = FALSE)
 
+# pull all mutations by treatment and time
+
+mut.cat.pos <- list(gradual = gradual.mtx,
+                           sudden = sudden.mtx) %>% lapply(lapply, function(x) {
+                             apply(x, 2, function(y) {
+                               y <- y[!grepl("\\+|\\-", names(y))]
+                               pos <- names(y)[ifelse(y > 0, TRUE, FALSE)] %>% gsub("\\D+", "", .) %>% as.numeric()
+                               genome <- rep(0, 11685)
+                               genome[pos] <- 1
+                               genome
+                             }) %>% t() %>% as.data.frame() %>% colSums()
+                           }) %>% lapply(function(x) {
+                             pos.vector <- bind_rows(x) %>% colSums()
+                             pos.vector[pos.vector > 1] <- 1
+                             pos.vector
+                           }) %>% bind_rows(.id = "treatment") %>% as.data.frame()
+
+rownames(mut.cat.pos) <- mut.cat.pos$treatment
+mut.cat.pos <- mut.cat.pos[-1]
+
+h.exp.cat <- fit.hurst(list(data = mut.cat.pos), d = 100) %>% bind_rows(.id = "treatment")
+
 # pull only mutations that reach a threshold by treatment and time
 
-mut.pos.thresh <- list(gradual = gradual.mtx %>% lapply(apply.filter, freq.thresh = .3),
-                       sudden = sudden.mtx %>% lapply(apply.filter, freq.thresh = .3)) %>% lapply(lapply, function(x) {
+mut.pos.thresh <- list(gradual = gradual.mtx %>% lapply(apply.filter, freq.thresh = .1),
+                       sudden = sudden.mtx %>% lapply(apply.filter, freq.thresh = .1)) %>% lapply(lapply, function(x) {
                          apply(x, 2, function(y) {
                            y <- y[!grepl("\\+|\\-", names(y))]
                            pos <- names(y)[ifelse(y > 0, TRUE, FALSE)] %>% gsub("\\D+", "", .) %>% as.numeric()
@@ -474,7 +485,7 @@ mut.pos.thresh <- list(gradual = gradual.mtx %>% lapply(apply.filter, freq.thres
 rownames(mut.pos.thresh) <- mut.pos.thresh$treatment
 mut.pos.thresh <- mut.pos.thresh[-1]
 
-h.exp.thresh <- fit.hurst(list(data = mut.pos.thresh), d = 2400) %>% bind_rows(.id = "treatment")
+h.exp.thresh <- fit.hurst(list(data = mut.pos.thresh), d = 1000) %>% bind_rows(.id = "treatment")
 
 # make a figure
 
@@ -486,18 +497,297 @@ hurst.gg <- ggarrange(h.exp.gg + labs(tag = "a"),
 
 ggsave("hurst.pdf", hurst.gg, width = 6.85, height = 4)
 
-# play with binary sequences from a Markov chain
+# calculate SI (same as RSI but with frequencies; max_hop = ncol - 1) 
 
-bin.mc <- function(pi.12, pi.21) inverse.rle(list(values = rep(0:1, 10000),
-                                                  lengths = 1 + rgeom(2*10000, rep(c(pi.12, pi.21), 10000))))
+cat.SI <- calc.RSI(cat.mtx %>% lapply(apply.filter, n.time = 8), shuffle.rep = 1000)
 
-H.test <- lapply(setNames(seq(.01, .99, .01), nm = 1:99), function(x) {
-  set.seed(x*10)
-  lst <- list(bin.mc(x, 1 - x)[1:11685],
-              bin.mc(x, x)[1:11685])
-  names(lst) <- c(paste0(1, ":", x, "_", 1 - x), paste0(2, ":", x, "_", x))
-  lst %>% bind_rows() %>% t() %>% as.data.frame()
-}) %>% bind_rows()
+SI.gg <- ggplot(cat.SI %>% bind_rows(.id = "treatment"), aes(RSI, RSI.boot)) +
+  xlab("RSI") + ylab("PSI") +
+  geom_point(aes(color = ifelse(p.adjust < .05, "a", "b")), size = 1) +
+  facet_wrap(~treatment) +
+  theme(legend.position = "none") +
+  scale_color_manual(values = c("tomato", "grey60"))
 
-hurst.test <- fit.hurst(list(test = H.test), d = 2000) %>% bind_rows(.id = "rep")
+# Taylor's law with mutations pulled together but comparing alleles with s < 0 and s > 0
+
+WF_ABC.res <- list(gradual = lapply(setNames(nm = c(98, 101, 102,
+                                                    106, 107, 109,
+                                                    112, 115, 116) %>% as.character()), function(x) {
+                                                      y <- read.table(paste0("SE_results/Results/Gradual.", x, "_res.csv"),
+                                                                      sep = ",", header = TRUE)
+                                                      y$allele <- rownames(gradual.mtx[[as.character(x)]])
+                                                      y
+                                                    }) %>% bind_rows(.id = "population"),
+                   sudden = lapply(setNames(nm = c(2, 5, 6,
+                                                   10, 11, 13,
+                                                   16, 19, 20) %>% as.character()), function(x) {
+                                                     y <- read.table(paste0("SE_results/Results/Sudden.", x, "_res.csv"),
+                                                                     sep = ",", header = TRUE)
+                                                     y$allele <- rownames(sudden.mtx[[as.character(x)]])
+                                                     y
+                                                   }) %>% bind_rows(.id = "population")) %>%
+  bind_rows(.id = "treatment")
+
+get.mut.s <- function(x, treat, s_ht_0) {
+  sel.muts <- WF_ABC.res[WF_ABC.res$treatment == treat &
+                           (WF_ABC.res$mean_s > 0) == s_ht_0, c("population", "allele")]
+  sel.muts <- paste(sel.muts$population, sel.muts$allele, sep = "_")
+  x[rownames(x) %in% sel.muts,]
+}
+
+cat.mtx.s <- list(`gradual s > 0` = cat.mtx$gradual %>% get.mut.s("gradual", TRUE),
+                  `gradual s < 0` = cat.mtx$gradual %>% get.mut.s("gradual", FALSE),
+                  `sudden s > 0` = cat.mtx$sudden %>% get.mut.s("sudden", TRUE),
+                  `sudden s < 0` = cat.mtx$sudden %>% get.mut.s("sudden", FALSE))
+
+cat.s.TL <- fit.TL(cat.mtx.s,
+                   zero.rate.threshold = NULL, normalize = FALSE)
+
+cat.s.TL.per_0 <- lapply(setNames(1:8, nm = as.character(1:8)), function(x) {
+  
+  # fit SNPs frequencies to Taylor's law
+  
+  TL <- fit.TL(cat.mtx.s %>% lapply(apply.filter, x, exact = TRUE),
+               zero.rate.threshold = NULL, normalize = FALSE, min.rows = 5)
+  
+  list(TL = TL)
+})
+
+cat.s.TL.gg <- plot.power_law(cat.s.TL$log_log.mean_sd,
+                              cat.mtx.s %>% calc.0_rate() %>% lapply(function(x) (1 - x) * 8),
+                              metadata.range = NULL, legend.title = "n", l10 = TRUE) +
+  xlab("mean (log)") + ylab("standard deviation (log)") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = .2)
+
+cat.s.TL.params.gg <- cat.s.TL.per_0 %>% lapply(function(x) x$TL$params) %>% bind_rows(.id = "n") %>%
+  ggplot(aes(V, beta, color = n)) +
+  geom_point(aes(shape = data)) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = .2)
+
+cat.s.TL.per_0.tb <- cat.s.TL.per_0 %>% lapply(function(x) x$TL$params) %>%
+  bind_rows(.id = "n") %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data), s = gsub(".*s ", "s ", data))
+
+cat.s.V.lm <- lm(V ~ s + treatment + sparsity,
+                 cat.s.TL.per_0.tb)
+
+cat.s.beta.lm <- lm(beta ~ s + treatment + sparsity,
+                    cat.s.TL.per_0.tb)
+
+# take into account how one parameter influences another
+
+cat.s.V.acc.beta.lm <- lm(V ~ s + treatment + sparsity + beta,
+                          cat.s.TL.per_0.tb)
+
+cat.s.beta.acc.beta.lm <- lm(beta ~ s + treatment + sparsity + V,
+                             cat.s.TL.per_0.tb)
+
+# manova
+
+cat.s.manova <- manova(cbind(V, beta) ~ s * treatment * sparsity, cat.s.TL.per_0.tb)
+
+ggsave("params_s_TL.pdf", cat.s.TL.gg, width = 6.85, height = 5)
+ggsave("params_s.pdf", cat.s.TL.params.gg, width = 6.85, height = 5)
+
+# investigate systemic behavior in fluctuations
+
+# by treatment
+
+cat.TL.time.point <- fit.time.sd(cat.mtx, return.mean = FALSE)
+
+cat.TL.time.point.gg <- plot.power_law(cat.TL.time.point$log_log.mean_sd,
+                                       metadata.range = NULL, l10 = FALSE) +
+  xlab("value (log)") + ylab("absolute difference from next value (log)") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = .2)# + geom_density_2d()
+
+# do not include differences that lead to elimination/fixation
+
+cat.TL.time.point.not.fix <- fit.time.sd(cat.mtx, return.mean = FALSE, not.fix = TRUE)
+
+cat.TL.time.point.not.fix.gg <- plot.power_law(cat.TL.time.point.not.fix$log_log.mean_sd,
+                                       metadata.range = NULL, l10 = TRUE) +
+  xlab("value (log)") + ylab("absolute difference from next value (log)") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = .2, color = "red") + geom_density_2d(linewidth = .2)
+
+# by allele
+
+cat.TL.time.point.log_log.allele <- cat.TL.time.point$log_log.mean_sd %>%
+  bind_rows(.id = "data") %>% dplyr::rename(allele = name)
+
+cat.TL.time.point.by.gene.gg <- cat.TL.time.point.log_log.allele %>%
+  ggplot(aes(mean, sd, group = allele)) + geom_smooth(method = "lm", se = FALSE, linewidth = .2) +
+  facet_wrap(~data) +
+  xlab("value (log)") + ylab("absolute difference from next value (log)")
+
+# lm by allele
+
+cat.TL.time.point.allele.params <- cat.TL.time.point.log_log.allele$allele %>% unique() %>%
+  setNames(nm = .) %>% lapply(function(x) {
+    y <- cat.TL.time.point.log_log.allele[cat.TL.time.point.log_log.allele$allele == x,]
+    
+    if(nrow(y) < 5) return()
+    
+    fit.summary <- lm(sd ~ mean, y) %>% summary()
+    list(allele = x,
+         V = fit.summary$coefficients[1] %>% exp(),
+         beta = fit.summary$coefficients[2],
+         Rsquared = fit.summary$r.squared,
+         `mean (log)` = exp(y$mean) %>% mean() %>% log10(),
+         treatment = y$data %>% unique())
+  }) %>% bind_rows()
+
+cat.TL.time.point.allele.beta.gg <- cat.TL.time.point.allele.params %>% ggplot(aes(treatment, beta)) +
+  geom_boxplot() 
+
+cat.TL.time.point.allele.beta.lm <- lm(beta ~ treatment,
+                                       cat.TL.time.point.allele.params %>% separate(allele, c("data", "allele"), "_"))
+
+cat.TL.time.point.allele.params.manova <- manova(cbind(V, beta) ~ data + allele,
+                                                 cat.TL.time.point.allele.params %>% separate(allele, c("data", "allele"), "_"))
+
+# by s/treatment
+
+cat.s.TL.time.point <- fit.time.sd(cat.mtx.s, return.mean = FALSE)
+
+cat.s.TL.time.point.gg <- plot.power_law(cat.s.TL.time.point$log_log.mean_sd,
+                                         metadata.range = NULL, l10 = FALSE) +
+  xlab("value (log)") + ylab("absolute difference from next value (log)") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = .2)
+
+# by dataset/treatment
+
+TL.time.point <- lapply(list(gradual = gradual.mtx,
+                             sudden = sudden.mtx), fit.time.sd, return.mean = FALSE)
+
+TL.time.point.V.beta <- lapply(TL.time.point, function(x) x$params) %>%
+  bind_rows(.id = "treatment")
+
+TL.time.point.V.beta.gg <- ggplot(TL.time.point.V.beta, aes(V, beta, color = treatment)) + geom_point()
+
+TL.time.point.V.beta.manova <- manova(cbind(V, beta) ~ treatment, TL.time.point.V.beta)
+
+# by dataset/treatment/s
+
+s.mtx <- c(mapply(function(x, y) {
+  rownames(x) <- paste(y, rownames(x), sep = "_")
+  x %>% get.mut.s("gradual", TRUE)
+}, gradual.mtx %>% setNames(paste0("gradual s > 0 ", names(gradual.mtx))), names(gradual.mtx), SIMPLIFY = FALSE),
+
+mapply(function(x, y) {
+  rownames(x) <- paste(y, rownames(x), sep = "_")
+  x %>% get.mut.s("gradual", FALSE)
+}, gradual.mtx %>% setNames(paste0("gradual s < 0 ", names(gradual.mtx))), names(gradual.mtx), SIMPLIFY = FALSE),
+
+mapply(function(x, y) {
+  rownames(x) <- paste(y, rownames(x), sep = "_")
+  x %>% get.mut.s("sudden", TRUE)
+}, sudden.mtx %>% setNames(paste0("sudden s > 0 ", names(sudden.mtx))), names(sudden.mtx), SIMPLIFY = FALSE),
+
+mapply(function(x, y) {
+  rownames(x) <- paste(y, rownames(x), sep = "_")
+  x %>% get.mut.s("sudden", FALSE)
+}, sudden.mtx %>% setNames(paste0("sudden s < 0 ", names(sudden.mtx))), names(sudden.mtx), SIMPLIFY = FALSE))
+
+s.TL.time.point <- fit.time.sd(s.mtx, return.mean = FALSE)
+
+s.TL.time.point.regression_plot <- s.TL.time.point$log_log.mean_sd %>% bind_rows(.id = "data") %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data),
+                s = gsub(".*s ", "s ", data) %>% gsub(" [0-9]*$", "", .)) %>%
+  ggplot(aes(mean, sd, color = treatment, linetype = s, group = data)) + geom_smooth(method = "lm", se = FALSE) +
+  xlab("value (log)") + ylab("absolute difference from next value (log)")
+
+s.TL.time.point.params <- s.TL.time.point$params %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data),
+                s = gsub(".*s ", "s ", data) %>% gsub(" [0-9]*$", "", .))
+
+s.TL.time.point.V.beta.gg <- ggplot(s.TL.time.point.params, aes(V, beta, color = treatment, shape = s)) + geom_point()
+
+s.TL.time.point.V.beta.manova <- manova(cbind(V, beta) ~ treatment * s, s.TL.time.point.params)
+
+# do not include differences that lead to elimination/fixation
+
+s.TL.time.point.not.fix <- fit.time.sd(s.mtx, return.mean = FALSE, not.fix = TRUE)
+
+s.TL.time.point.not.fix.regression_plot <- s.TL.time.point.not.fix$log_log.mean_sd %>% bind_rows(.id = "data") %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data),
+                s = gsub(".*s ", "s ", data) %>% gsub(" [0-9]*$", "", .)) %>%
+  ggplot(aes(mean, sd, color = treatment, linetype = s, group = data)) + geom_smooth(method = "lm", se = FALSE) +
+  xlab("value (log)") + ylab("absolute difference from next value (log)")
+
+s.TL.time.point.not.fix.params <- s.TL.time.point.not.fix$params %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data),
+                s = gsub(".*s ", "s ", data) %>% gsub(" [0-9]*$", "", .))
+
+s.TL.time.point.no.fix.V.beta.gg <- ggplot(s.TL.time.point.not.fix.params, aes(V, beta, color = treatment, shape = s)) + geom_point()
+
+s.TL.time.point.no.fix.V.beta.manova <- manova(cbind(V, beta) ~ treatment * s, s.TL.time.point.not.fix.params)
+
+# post-hoc test
+
+
+
+# test with entropy (higher fluctuation on higher entropy)
+
+s.TL.time.point.not.fix.entropy <- fit.time.sd(s.mtx, return.mean = FALSE, not.fix = TRUE, use.entropy = TRUE)
+
+s.TL.time.point.not.fix.entropy.tb <- s.TL.time.point.not.fix.entropy$log_log.mean_sd %>% bind_rows(.id = "data") %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data),
+                s = gsub(".*s ", "s ", data) %>% gsub(" [0-9]*$", "", .))
+
+s.TL.time.point.not.fix.entropy.regression_plot <- s.TL.time.point.not.fix.entropy.tb %>%
+  ggplot(aes(mean, sd, color = treatment, group = data)) + geom_smooth(method = "lm", se = FALSE) +
+  xlab("entropy (log)") + ylab("absolute difference from next value (log)") + facet_wrap(~s)
+
+s.TL.time.point.not.fix.entropy.regression_plot_2 <- s.TL.time.point.not.fix.entropy.tb %>%
+  ggplot(aes(mean, sd, color = treatment)) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = .2, linetype = "dashed", color = "black") + geom_density_2d(linewidth = .2) +
+  geom_point(shape = 20, stroke = 0, size = .75) +
+  xlab("entropy (log)") + ylab("absolute difference from next value (log)") + facet_wrap(~data)
+
+s.TL.time.point.not.fix.entropy.treatment.gg <- s.TL.time.point.not.fix.entropy.tb %>%
+  ggplot(aes(mean, sd)) + geom_point(shape = 20, stroke = 0, size = .75) + 
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = .2, color = "red") + geom_density_2d(linewidth = .2) +
+  xlab("entropy (log)") + ylab("absolute difference from next value (log)") + facet_wrap(~treatment)
+
+s.TL.time.point.not.fix.entropy.treatment.s.gg <- s.TL.time.point.not.fix.entropy.tb %>%
+  ggplot(aes(mean, sd)) + geom_point(shape = 20, stroke = 0, size = .75) + 
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = .2, color = "red") + geom_density_2d(linewidth = .2) +
+  xlab("entropy (log)") + ylab("absolute difference from next value (log)") + facet_wrap(~paste0(treatment, " ", s))
+
+s.TL.time.point.not.fix.entropy.params <- s.TL.time.point.not.fix.entropy$params %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data),
+                s = gsub(".*s ", "s ", data) %>% gsub(" [0-9]*$", "", .),
+                population = gsub(" s . 0", "", data))
+ 
+s.TL.time.point.no.fix.entropy.V.beta.gg <- ggplot(s.TL.time.point.not.fix.entropy.params, aes(log(V), log(beta), color = treatment, shape = s)) + geom_point()
+
+s.TL.time.point.no.fix.entropy.V.beta.manova <- manova(cbind(V, beta) ~ treatment * s + population, s.TL.time.point.not.fix.entropy.params)
+
+# post-hoc test
+
+s.TL.time.point.no.fix.entropy.V.beta.manova.lst <- list(`s > 0` = manova(cbind(V, beta) ~ treatment, s.TL.time.point.not.fix.entropy.params %>%
+                                                                            filter(s == "s > 0")),
+                                                         `s < 0` = manova(cbind(V, beta) ~ treatment, s.TL.time.point.not.fix.entropy.params %>%
+                                                                            filter(s == "s < 0")))
+
+# permutation entropy
+
+perm.ent <- function(matrices) {
+  
+  for (m in names(matrices)) {
+    
+    x <- matrices[[m]]
+    
+    d.x <- apply(x, 1, diff) %>% t() %>% as.data.frame()
+    
+    perm <- d.x %>% mutate()
+    
+    print(perm)
+    
+    # ignore permutation where one element doesn't change
+  }
+  
+}
+
+
 

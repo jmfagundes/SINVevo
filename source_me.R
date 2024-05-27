@@ -514,6 +514,7 @@ process.rank <- function(cpxcruncher_corrank.path = NULL,
 #' @param get.rep Return replicates
 #' @param keep.borders Keep first and last point when calculating punctual rank stability
 #' @param genes.to.keep If not NULL, only keep these genes
+#' @param analyze.fluctuation.only Only analyze the fluctuation of mutations 
 #' 
 #' @return A list of the RSI of each gene, or if shuffle.rep is not NULL, a table containing the RSI, PSI, mean RSI of replicates and p-values for punctual stability
 #' @export
@@ -526,7 +527,8 @@ calc.RSI <- function(rank.matrices,
                      cdf.method = "ecdf",
                      get.rep = FALSE,
                      keep.borders = TRUE,
-                     genes.to.keep = NULL) {
+                     genes.to.keep = NULL,
+                     analyze.fluctuation.only = FALSE) {
   
   RSI.lst <- list()
   
@@ -536,8 +538,11 @@ calc.RSI <- function(rank.matrices,
     
     if (!is.null(genes.to.keep)) rank.mtx <- rank.mtx[rownames(rank.mtx) %in% genes.to.keep,]
     
-    max_hop <- (ncol(rank.mtx) - 1) * (nrow(rank.mtx) - 1)
-    RSI <- apply(rank.mtx, 1, function(x) (1 - (sum(abs(diff(x))) / max_hop)) ** power_index)
+    max_hop <- ncol(rank.mtx) - 1
+    RSI <- apply(rank.mtx, 1, function(x) {
+      if (analyze.fluctuation.only) (1 - (sum(abs(diff(x[x > 0 & x < 1]))) / (length(x[x > 0 & x < 1]) - 1))) ** power_index
+      else (1 - (sum(abs(diff(x))) / max_hop)) ** power_index
+    })
     
     if (is.null(shuffle.rep)) {
       
@@ -557,10 +562,16 @@ calc.RSI <- function(rank.matrices,
       for (i in 1:shuffle.rep) {
         
         set.seed(i)
-        if (keep.borders) rank.mtx.rep <- rank.mtx[c(1, sample(2:(ncol(rank.mtx) - 1)), ncol(rank.mtx))]
-        else rank.mtx.rep <- rank.mtx[sample(ncol(rank.mtx))]
-        RSI.rep[i] <- apply(rank.mtx.rep, 1, function(x) (1 - (sum(abs(diff(x))) / max_hop)) ** power_index)
-        
+        RSI.rep[i] <- apply(rank.mtx, 1, function(x) {
+          
+          if (analyze.fluctuation.only) x <- x[x > 0 & x < 1]
+          
+          if (keep.borders) {
+            y <- x[c(1, sample(2:(length(x) - 1)), length(x))]
+          } else y <- y[sample(ncol(x))]
+          
+          (1 - (sum(abs(diff(y))) / (length(y) - 1))) ** power_index
+        })
       }
       
       if (get.rep) {
@@ -579,27 +590,29 @@ calc.RSI <- function(rank.matrices,
         RSI.mtx$p.value <- pnorm(RSI.mtx$z.score, RSI.mtx$RSI.rep.mean, RSI.mtx$RSI.rep.sd, FALSE)
         RSI.mtx$p.adjust <- p.adjust(RSI.mtx$p.value, method = method)
         
+        RSI.mtx <- RSI.mtx[!is.nan(RSI.mtx$RSI),]
+        
         # also add p.value based on a survival function (1 - CDF) of the RSI rep distribution , i.e., the probability of finding a RSI value at least this high
-        
-        RSI.mtx$p.value.survival <- lapply(1:nrow(RSI.mtx), function(x) {
-          
-          if (RSI.mtx$RSI.boot[x] == 1) return(NaN)
-          
-          if (cdf.method == "ecdf") {
-            
-            CDF <- RSI.rep[x,] %>% unlist() %>% as.vector() %>% ecdf()
-            P <- CDF(RSI.mtx$RSI[x])
-            
-          } else if (cdf.method == "monoH.FC") {
-            
-            CDF <- RSI.rep[x,] %>% unlist() %>% as.vector() %>% density() %>% with(splinefun(x, cumsum(y) / sum(y), method = "monoH.FC")) # based on https://stats.stackexchange.com/questions/78711/how-to-find-estimate-probability-density-function-from-density-function-in-r
-            P <- CDF(RSI.mtx$RSI[x])
-            P <- P %>% min(1) %>% max(0) # due to spline estimation, P can be < 0 or > 1
-          }
-          return(1 - P)
-        }) %>% unlist()
-        
-        RSI.mtx$p.adjust.survival <- p.adjust(RSI.mtx$p.value.survival, method = method)
+
+        #  RSI.mtx$p.value.survival <- lapply(1:nrow(RSI.mtx), function(x) {
+        #  
+        #  if (RSI.mtx$RSI.boot[x] == 1) return(NaN)
+        #  
+        #  if (cdf.method == "ecdf") {
+        #    
+        #    CDF <- RSI.rep[x,] %>% unlist() %>% as.vector() %>% ecdf()
+        #    P <- CDF(RSI.mtx$RSI[x])
+        #    
+        #  } else if (cdf.method == "monoH.FC") {
+        #    
+        #    CDF <- RSI.rep[x,] %>% unlist() %>% as.vector() %>% density() %>% with(splinefun(x, cumsum(y) / sum(y), method = "monoH.FC")) # based on https://stats.stackexchange.com/questions/78711/how-to-find-estimate-probability-density-function-from-density-function-in-r
+        #    P <- CDF(RSI.mtx$RSI[x])
+        #    P <- P %>% min(1) %>% max(0) # due to spline estimation, P can be < 0 or > 1
+        #  }
+        #  return(1 - P)
+        #}) %>% unlist()
+        #
+        #RSI.mtx$p.adjust.survival <- p.adjust(RSI.mtx$p.value.survival, method = method)
         
         # reorder by accumulated rank (not accumulated abundance rank)
         
@@ -1078,26 +1091,71 @@ apply.filter <- function(x,
   else return(x[!above_freq.thresh,])
 }
 
+#' shannon.entropy
+shannon.entropy <- function(freq.lst) -sum(lapply(freq.lst, function(x) x * log(x, 2)) %>% unlist())
 
-#' fit.JL
+
+#' calc.entropy
 #' 
-#' Fit matrices in a list to Joint's law
+#' Calculate entropies for each allele frequency
 #' 
-#' @param matrices List of matrices
-#' @param zero.rate.threshold Filter out genes with percentage of zeros higher than zero.rate.threshold
-#' @param normalize Boolean. Whether to transform the matrices to abundance matrix by performing cell size normalization
-#' @param remove.zeros Do not include zeros when calculating mean and standard deviation
-#' @param min.rows Skip matrix with number of elements (rows) < min.rows
+#' @param alt.freq.list List of alternative allele frequencies
+#' @param return.sum Return the sum of the entropies
 #' 
-#' @return A list of the Joint's parameters, the linear models and the log-transformed mean and standard deviation data
+#' @return Shannon entropy sum
 #' @export
 #' 
 #' @examples
-fit.JL <- function(matrices,
-                   zero.rate.threshold = .95,
-                   normalize = TRUE,
-                   remove.zeros = FALSE,
-                   min.rows = NULL) {
+calc.entropy <- function(alt.freq.lst,
+                         return.sum = TRUE) {
+  
+  if (sum(alt.freq.lst) == 0) return(0)
+  
+  # remove indels
+  
+  alt.freq.lst <- alt.freq.lst[!grepl("\\+|\\-", names(alt.freq.lst))]
+  
+  # remove 0 or 1 variants
+  
+  alt.freq.lst <- alt.freq.lst[!alt.freq.lst %in% c(0, 1)]
+  
+  # get snps at same site
+  
+  sites <- names(alt.freq.lst) %>%
+    gsub("[A-Z+-]*", "", .) %>% gsub("\\*", "", .) %>% unique()
+  
+  # calcute entropy
+  
+  entropies <- lapply(setNames(nm = sites), function(x) {
+    
+    snps <- alt.freq.lst[grepl(paste0("^", x, "[ACTG]|^", x, "\\*"), names(alt.freq.lst))]
+    ref.freq <- 1 - sum(snps)
+    shannon.entropy(c(snps, ref.freq))
+  })
+  
+  if (return.sum) sum(entropies %>% unlist()) %>% return()
+  else return(entropies)
+}
+
+#' fit.time.sd
+#' 
+#' Calculate deviation from next point to investigate systemic deterministic behavior
+#' 
+#' @param matrices Input matrices
+#' @param return.mean Returns the mean value of each allele
+#' @param not.fix Do not analyse differences that lead to the loss/fixation of an allele
+#' @param use.entropy Use the entropy of an allele (summing the frequencies of all other alternative allele)
+#' @param remove.indels Remove indels. Set to TRUE if use.entropy = TRUE
+#' 
+#' @return A list with the results with same names as fit.TL for compatibility
+#' @export
+#' 
+#' @examples
+fit.time.sd <- function(matrices,
+                        return.mean = TRUE,
+                        not.fix = FALSE,
+                        use.entropy = FALSE,
+                        remove.indels = FALSE) {
   
   params.tb <- data.frame(data = character(),
                           V = numeric(),
@@ -1105,48 +1163,81 @@ fit.JL <- function(matrices,
                           R.squared = numeric(),
                           n.cells = numeric(),
                           n.genes = numeric(),
-                          sparsity = numeric())
-  max_sd.lst <- list()
+                          sparsity = numeric(),
+                          model = character())
+  log_log.mean_sd.lst <- list()
   lm.lst <- list()
   
-  for (m in matrices %>% names()) {
+  for (m in names(matrices)) {
     
-    gene.mtx <- matrices[[m]]
+    x <- matrices[[m]]
     
-    if (is.null(ncol(gene.mtx))) next
-    if (!is.null(min.rows)) if (nrow(gene.mtx) < min.rows) next
-    if (!is.null(zero.rate.threshold)) {
+    if (use.entropy | remove.indels) x <- x[!grepl("\\+|\\-", rownames(x)),]
+    
+    if (not.fix) x[x == 0 | x == 1] <- NA 
+    
+    d.x <- apply(x, 1, diff) %>% abs() %>% t() %>% as.data.frame()
+    
+    if (use.entropy) x <- x %>% mutate_all(function(y) {
       
-      zero.rate.genes <- calc.0_rate(list(mtx = gene.mtx))$mtx
-      zero.rate.genes <- zero.rate.genes[zero.rate.genes > zero.rate.threshold] %>% names()
-      
-      gene.mtx <- gene.mtx[!rownames(gene.mtx) %in% zero.rate.genes,]
-    }
-    if (normalize) gene.mtx <- gene.mtx %>% normalize.cells
+      lapply(y, function(z) {
+        if (is.na(z)) return(z)
+        shannon.entropy(c(z, 1 - z))
+      })
+    })
+
+    if (return.mean) {
     
-    if (remove.zeros) {
-      max_sd <- data.frame(max.time = apply(gene.mtx, 1, function(x) which.max(x[x > 0])),
-                           sd.from.max = apply(gene.mtx, 1, function(x) sqrt(sum(((x[x > 0]) - max(x))**2)/(length(x[x > 0]) - 1))))
-    } else {
-      max_sd <- data.frame(max.time = apply(gene.mtx, 1, function(x) which.max(x)),
-                           sd.from.max = apply(gene.mtx, 1, function(x) sqrt(sum((x - max(x))**2)/(length(x) - 1))))
-      max_sd <- max_sd[max_sd$max.time > 0 & max_sd$sd.from.max > 0,]
-    }
+    mean_sd <- data.frame(mean = rowMeans(x),
+                         sd = rowMeans(d.x ** 2))
     
-    lm.max_sd <- lm(sd.from.max ~ max.time, data = max_sd)
-    fit.summary <- summary(lm.max_sd)
+    mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
+    
+    log_log.mean_sd <- log(mean_sd)
+    lm.log_log.mean_sd <- lm(sd ~ mean, data = log_log.mean_sd)
+    fit.summary <- summary(lm.log_log.mean_sd)
+    
     
     params.tb[nrow(params.tb) + 1,] <- list(m, fit.summary$coefficients[1] %>% exp(),
-                                            fit.summary$coefficients[2],
-                                            fit.summary$r.squared,
-                                            gene.mtx %>% ncol(),
-                                            max_sd %>% nrow(),
-                                            coop::sparsity(gene.mtx %>% as.matrix()))
-    max_sd.lst[[m]] <- max_sd
-    lm.lst[[m]] <- lm.max_sd
+                                           fit.summary$coefficients[2],
+                                           fit.summary$r.squared,
+                                           x %>% ncol(),
+                                           log_log.mean_sd %>% nrow(),
+                                           coop::sparsity(x %>% as.matrix()),
+                                           "LLR")
+    log_log.mean_sd.lst[[m]] <- log_log.mean_sd
+    lm.lst[[m]] <- lm.log_log.mean_sd
+    
+    } else {
+      
+      # keep mean as value for compatibility with other functions
+      
+      x <- x[1:(length(x) - 1)]
+
+      v_sd <- data.frame(mean = stack(x)$values,
+                         sd = stack(d.x)$values,
+                         name = rownames(x))
+      
+      v_sd <- v_sd[v_sd$mean > 0 & v_sd$sd > 0 & !is.na(v_sd$sd),]
+      
+      log_log.v_sd <- log(v_sd[c("mean", "sd")]) %>% cbind(v_sd["name"])
+      lm.fit <- lm(sd ~ mean, data = log_log.v_sd)
+      fit.summary <- summary(lm.fit)
+      
+      params.tb[nrow(params.tb) + 1,] <- list(m, fit.summary$coefficients[1] %>% exp(),
+                                              fit.summary$coefficients[2],
+                                              fit.summary$r.squared,
+                                              x %>% ncol(),
+                                              v_sd %>% nrow(),
+                                              0,#coop::sparsity(x %>% as.matrix()),
+                                              "LLR")
+      log_log.mean_sd.lst[[m]] <- log_log.v_sd
+      lm.lst[[m]] <- lm.fit
+      
+    }  
+    
   }
-  params.tb$model <- "LLR"
   return(list(params = params.tb,
-              max_sd = max_sd.lst,
-              lm.max_sd = lm.lst))
+              log_log.mean_sd = log_log.mean_sd.lst,
+              lm.log_log.mean_sd = lm.lst))
 }

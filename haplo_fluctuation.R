@@ -113,7 +113,7 @@ haplo.RSI <- haplo.rank %>% lapply(calc.RSI, shuffle.rep = 1000)
 gradual.calder <- lapply(setNames(nm = c("98", "101", "102",
                                          "106", "107", "109",
                                          "112", "115", "116") %>% as.character()), function(x) {
-                                           y <- read.table(paste0("SF_results/calder/Gradual.", x, "/Gradual_soln1.csv"),
+                                           y <- read.table(paste0("SE_results/calder/Gradual.", x, "/Gradual_soln1.csv"),
                                                            sep = ",", row.names = 1, skip = 15, nrows = 8, fill = TRUE) %>% t()
                                            y[is.na(y)] <- 0
                                            y %>% as.data.frame()
@@ -124,7 +124,7 @@ colnames(gradual.calder$`112`) <- c("4", "7", "10", "13", "16", "19", "22", "25"
 sudden.calder <- lapply(setNames(nm = c("2", "5", "6",
                                         "10", "11", "13",
                                         "16", "19", "20") %>% as.character()), function(x) {
-                                          y <- read.table(paste0("SF_results/calder/Sudden.", x, "/Sudden_soln1.csv"),
+                                          y <- read.table(paste0("SE_results/calder/Sudden.", x, "/Sudden_soln1.csv"),
                                                           sep = ",", row.names = 1, skip = 15, nrows = 8, fill = TRUE) %>% t()
                                           y[is.na(y)] <- 0
                                           y %>% as.data.frame()
@@ -152,4 +152,49 @@ calder.cat.TL <- fit.TL(calder.cat %>% lapply(function(x) x[rowSums(x) > 0,]),
 calder.cat.TL$log_log.mean_sd %>% bind_rows(.id = "treatment") %>%
   ggplot(aes(mean, sd, color = treatment)) + geom_point() + geom_smooth(method = "lm", se = FALSE)
 
+# per 0 rate
+
+calder.cat.TL.per_0 <- lapply(setNames(1:8, nm = as.character(1:8)), function(x) {
+  
+  # fit SNPs frequencies to Taylor's law
+  
+  TL <- fit.TL(calder.cat %>% lapply(apply.filter, x, exact = TRUE),
+               zero.rate.threshold = NULL, normalize = FALSE, min.rows = 5)
+  
+  list(TL = TL)
+})
+
+calder.cat.TL.per_0.gg <- plot.power_law(calder.cat.TL$log_log.mean_sd,
+               calder.cat %>% calc.0_rate(),
+               metadata.range = NULL, legend.title = "0 rate", l10 = TRUE) +
+  xlab("mean (log)") + ylab("standard deviation (log)") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE)
+
+calder.cat.TL.per_0.params.gg <- calder.cat.TL.per_0 %>% lapply(function(x) x$TL$params) %>% bind_rows(.id = "n") %>%
+  ggplot(aes(V, beta, color = n, shape = data)) + geom_point()
+
+#calder.cat.wilcox.V <- wilcox.test(calder.cat.TL.per_0 %>% lapply(function(x) x$TL$params) %>%
+#                                     bind_rows(.id = "n") %>% filter(data == "gradual") %>% dplyr::select(V) %>% unlist(),
+#                                   calder.cat.TL.per_0 %>% lapply(function(x) x$TL$params) %>%
+#                                     bind_rows(.id = "n") %>% filter(data == "sudden") %>% dplyr::select(V) %>% unlist(),
+#                                   paired = TRUE)
+#
+#calder.cat.wilcox.beta <- wilcox.test(calder.cat.TL.per_0 %>% lapply(function(x) x$TL$params) %>%
+#                                        bind_rows(.id = "n") %>% filter(data == "gradual") %>% dplyr::select(beta) %>% unlist(),
+#                                      calder.cat.TL.per_0 %>% lapply(function(x) x$TL$params) %>%
+#                                        bind_rows(.id = "n") %>% filter(data == "sudden") %>% dplyr::select(beta) %>% unlist(),
+#                                      paired = TRUE)
+
+calder.cat.TL.per_0.tb <- calder.cat.TL.per_0 %>% lapply(function(x) x$TL$params) %>%
+  bind_rows(.id = "n") %>% mutate(n := as.numeric(n))
+
+calder.cat.V.lm <- lm(V ~ data * n * beta,
+                      calder.cat.TL.per_0.tb)
+
+calder.cat.beta.lm <- lm(beta ~ data * n * V,
+                         calder.cat.TL.per_0.tb)
+
+# manova
+
+calder.cat.manova <- manova(cbind(V, beta) ~ data * sparsity, calder.cat.TL.per_0.tb)
 
