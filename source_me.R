@@ -1094,6 +1094,13 @@ apply.filter <- function(x,
 #' shannon.entropy
 shannon.entropy <- function(freq.lst) -sum(lapply(freq.lst, function(x) x * log(x, 2)) %>% unlist())
 
+shannon.entropy.lst <- function(obs) {
+  freq <- table(obs) / length(obs)
+  vec <- as.data.frame(freq)[,2]
+  vec < -vec[vec > 0]
+  -sum(vec * log2(vec))
+}
+
 
 #' calc.entropy
 #' 
@@ -1139,12 +1146,14 @@ calc.entropy <- function(alt.freq.lst,
 
 #' fit.time.sd
 #' 
-#' Calculate deviation from next point to investigate systemic deterministic behavior
+#' Calculate deviation from next/previous point to investigate systemic deterministic behavior
 #' 
 #' @param matrices Input matrices
+#' @param next.point Use deviation from next point
 #' @param return.mean Returns the mean value of each allele
 #' @param not.fix Do not analyse differences that lead to the loss/fixation of an allele
 #' @param use.entropy Use the entropy of an allele (summing the frequencies of all other alternative allele)
+#' @param use.quasi.entropy Use -freq * log(freq, 2)
 #' @param remove.indels Remove indels. Set to TRUE if use.entropy = TRUE
 #' 
 #' @return A list with the results with same names as fit.TL for compatibility
@@ -1152,9 +1161,11 @@ calc.entropy <- function(alt.freq.lst,
 #' 
 #' @examples
 fit.time.sd <- function(matrices,
+                        next.point = TRUE,
                         return.mean = TRUE,
                         not.fix = FALSE,
                         use.entropy = FALSE,
+                        use.quasi.entropy = FALSE,
                         remove.indels = FALSE) {
   
   params.tb <- data.frame(data = character(),
@@ -1185,34 +1196,43 @@ fit.time.sd <- function(matrices,
         shannon.entropy(c(z, 1 - z))
       })
     })
+    
+    if (use.quasi.entropy) x <- x %>% mutate_all(function(y) {
+      
+      lapply(y, function(z) {
+        if (is.na(z)) return(z)
+        -z * log(z, 2)
+      })
+    })
 
     if (return.mean) {
-    
-    mean_sd <- data.frame(mean = rowMeans(x),
-                         sd = rowMeans(d.x ** 2))
-    
-    mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
-    
-    log_log.mean_sd <- log(mean_sd)
-    lm.log_log.mean_sd <- lm(sd ~ mean, data = log_log.mean_sd)
-    fit.summary <- summary(lm.log_log.mean_sd)
-    
-    
-    params.tb[nrow(params.tb) + 1,] <- list(m, fit.summary$coefficients[1] %>% exp(),
-                                           fit.summary$coefficients[2],
-                                           fit.summary$r.squared,
-                                           x %>% ncol(),
-                                           log_log.mean_sd %>% nrow(),
-                                           coop::sparsity(x %>% as.matrix()),
-                                           "LLR")
-    log_log.mean_sd.lst[[m]] <- log_log.mean_sd
-    lm.lst[[m]] <- lm.log_log.mean_sd
+      
+      mean_sd <- data.frame(mean = rowMeans(x),
+                            sd = rowMeans(d.x ** 2))
+        
+      mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
+      
+      log_log.mean_sd <- log(mean_sd)
+      lm.log_log.mean_sd <- lm(sd ~ mean, data = log_log.mean_sd)
+      fit.summary <- summary(lm.log_log.mean_sd)
+      
+      
+      params.tb[nrow(params.tb) + 1,] <- list(m, fit.summary$coefficients[1] %>% exp(),
+                                             fit.summary$coefficients[2],
+                                             fit.summary$r.squared,
+                                             x %>% ncol(),
+                                             log_log.mean_sd %>% nrow(),
+                                             coop::sparsity(x %>% as.matrix()),
+                                             "LLR")
+      log_log.mean_sd.lst[[m]] <- log_log.mean_sd
+      lm.lst[[m]] <- lm.log_log.mean_sd
     
     } else {
       
       # keep mean as value for compatibility with other functions
       
-      x <- x[1:(length(x) - 1)]
+      if (next.point) x <- x[1:(length(x) - 1)]
+      else x <- x[2:length(x)]
 
       v_sd <- data.frame(mean = stack(x)$values,
                          sd = stack(d.x)$values,
