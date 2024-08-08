@@ -1101,7 +1101,6 @@ shannon.entropy.lst <- function(obs) {
   -sum(vec * log2(vec))
 }
 
-
 #' calc.entropy
 #' 
 #' Calculate entropies for each allele frequency
@@ -1144,6 +1143,41 @@ calc.entropy <- function(alt.freq.lst,
   else return(entropies)
 }
 
+#' calc.afd
+#' 
+#' Calculate AFD between two populations
+#' 
+#' @param AF.tb Two-column data frame with allele frequencies
+#' 
+#' @return AFD
+#' @export
+#' 
+#' @examples
+calc.afd <- function(AF.tb) {
+  
+  # remove indels
+  
+  AF.tb <- AF.tb[!grepl("\\+|\\-", row.names(AF.tb)),]
+
+  # get snps at same site
+  
+  sites <- row.names(AF.tb) %>%
+    gsub("[A-Z+-]*", "", .) %>% gsub("\\*", "", .) %>% unique()
+  
+  # calcute afd
+  
+  afd <- lapply(setNames(nm = sites), function(x) {
+    
+    alleles <- AF.tb[grepl(paste0("^", x, "[ACTG]|^", x, "\\*"), row.names(AF.tb)),]
+    alleles["ref",] <- 1 - colSums(alleles)
+    alleles.diff <- abs(alleles[1] - alleles[2])
+    colSums(alleles.diff) / 2
+    
+  }) %>% unlist() %>% sum()
+  
+  return(afd)
+}
+
 #' fit.time.sd
 #' 
 #' Calculate deviation from next/previous point to investigate systemic deterministic behavior
@@ -1152,9 +1186,11 @@ calc.entropy <- function(alt.freq.lst,
 #' @param next.point Use deviation from next point
 #' @param return.mean Returns the mean value of each allele
 #' @param not.fix Do not analyse differences that lead to the loss/fixation of an allele
+#' @param fix Only analyse alleles that are fixed
 #' @param use.entropy Use the entropy of an allele (summing the frequencies of all other alternative allele)
 #' @param use.quasi.entropy Use -freq * log(freq, 2)
 #' @param remove.indels Remove indels. Set to TRUE if use.entropy = TRUE
+#' @param logt Power-law relationship
 #' 
 #' @return A list with the results with same names as fit.TL for compatibility
 #' @export
@@ -1164,9 +1200,11 @@ fit.time.sd <- function(matrices,
                         next.point = TRUE,
                         return.mean = TRUE,
                         not.fix = FALSE,
+                        fix = FALSE,
                         use.entropy = FALSE,
                         use.quasi.entropy = FALSE,
-                        remove.indels = FALSE) {
+                        remove.indels = FALSE,
+                        logt = TRUE) {
   
   params.tb <- data.frame(data = character(),
                           V = numeric(),
@@ -1183,10 +1221,14 @@ fit.time.sd <- function(matrices,
     
     x <- matrices[[m]]
     
+    if (fix) x <- x %>% apply.filter(freq.thresh = 1)
+
+    if (nrow(x) == 0) next
+    
     if (use.entropy | remove.indels) x <- x[!grepl("\\+|\\-", rownames(x)),]
     
     if (not.fix) x[x == 0 | x == 1] <- NA 
-    
+
     d.x <- apply(x, 1, diff) %>% abs() %>% t() %>% as.data.frame()
     
     if (use.entropy) x <- x %>% mutate_all(function(y) {
@@ -1240,8 +1282,9 @@ fit.time.sd <- function(matrices,
       
       v_sd <- v_sd[v_sd$mean > 0 & v_sd$sd > 0 & !is.na(v_sd$sd),]
       
-      log_log.v_sd <- log(v_sd[c("mean", "sd")]) %>% cbind(v_sd["name"])
-      lm.fit <- lm(sd ~ mean, data = log_log.v_sd)
+      if (logt) v_sd <- log(v_sd[c("mean", "sd")]) %>% cbind(v_sd["name"])
+      
+      lm.fit <- lm(sd ~ mean, data = v_sd)
       fit.summary <- summary(lm.fit)
       
       params.tb[nrow(params.tb) + 1,] <- list(m, fit.summary$coefficients[1] %>% exp(),
@@ -1251,11 +1294,10 @@ fit.time.sd <- function(matrices,
                                               v_sd %>% nrow(),
                                               0,#coop::sparsity(x %>% as.matrix()),
                                               "LLR")
-      log_log.mean_sd.lst[[m]] <- log_log.v_sd
+      log_log.mean_sd.lst[[m]] <- v_sd
       lm.lst[[m]] <- lm.fit
       
     }  
-    
   }
   return(list(params = params.tb,
               log_log.mean_sd = log_log.mean_sd.lst,

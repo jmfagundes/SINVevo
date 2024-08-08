@@ -191,10 +191,11 @@ calder.cat.TL.per_0.tb <- calder.cat.TL.per_0 %>% lapply(function(x) x$TL$params
 calder.cat.V.lm <- lm(V ~ data * n * beta,
                       calder.cat.TL.per_0.tb)
 
-calder.cat.beta.lm <- lm(beta ~ data * n * V,
+calder.cat.beta.lm <- lm(beta ~ data * n,
                          calder.cat.TL.per_0.tb)
 
 # manova
 
 calder.cat.manova <- manova(cbind(V, beta) ~ data * sparsity, calder.cat.TL.per_0.tb)
+
 
