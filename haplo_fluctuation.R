@@ -104,9 +104,9 @@ snps.pca.gg <- snps.pca %>% lapply(lapply, function(x) {
 
 # RSI haplotypes
 
-haplo.rank <- haplo.freqs %>% lapply(function(x) process.rank(matrices = x, method = "random"))
-
-haplo.RSI <- haplo.rank %>% lapply(calc.RSI, shuffle.rep = 1000)
+# haplo.rank <- haplo.freqs %>% lapply(function(x) process.rank(matrices = x, method = "random"))
+# 
+# haplo.RSI <- haplo.rank %>% lapply(calc.RSI, shuffle.rep = 1000)
 
 # read CALDER output (clone proportion matrix)
 
@@ -198,4 +198,75 @@ calder.cat.beta.lm <- lm(beta ~ data * n,
 
 calder.cat.manova <- manova(cbind(V, beta) ~ data * sparsity, calder.cat.TL.per_0.tb)
 
+# test Zipf's law
+
+fit.ZL <- function(mtx.lst,
+                   npsi = NULL) {
+  
+  mtx.lst %>% lapply(function(x) {
+    
+    apply(x %>% normalize.cells(), 2, function(y) {
+      
+      df <- data.frame(freq = y %>% log10(),
+                       rank = rank(-y, ties.method = "min") %>% log10())
+      
+      df <- df[df$freq != -Inf,]
+      
+      lm <- lm(freq ~ rank, df)
+      alpha <- summary(lm)$coefficients[2]
+      
+      if (is.null(npsi)) breakpoints = NA
+      else {
+        
+        seg.lm <- segmented(lm,
+                            npsi = npsi,
+                            control = seg.control(alpha = 0))
+        
+        alpha <- paste0(list(alpha, summary(seg.lm)$coefficients[2]), collapse = ",")
+        breakpoints <- summary(seg.lm)$psi[,2] %>% paste0(collapse = ",")
+      }
+      
+      list(df.log = df,
+           lm = lm,
+           alpha = alpha,
+           breakpoints = breakpoints)
+    })
+  })
+}
+
+gradual.zipf.fit <- fit.ZL(gradual.calder %>% lapply(function(x) x[rowSums(x) > 0,]))
+sudden.zipf.fit <- fit.ZL(sudden.calder %>% lapply(function(x) x[rowSums(x) > 0,]))
+
+gradual.zipf.fit$`101` %>%
+  lapply(function(x) x$df.log) %>% bind_rows(.id = "min") %>%
+  ggplot(aes(rank, freq)) + geom_point() + geom_smooth(method = "lm") +
+  facet_wrap(~min %>% as.numeric())
+
+sudden.zipf.fit$`2` %>%
+  lapply(function(x) x$df.log) %>% bind_rows(.id = "min") %>%
+  ggplot(aes(rank, freq)) + geom_point() + geom_smooth(method = "lm") +
+  facet_wrap(~min %>% as.numeric())
+
+zipf.alphas <- list(gradual = gradual.zipf.fit %>% lapply(function(x) x %>% lapply(function(y) list(alpha = y$alpha)) %>%
+                                                            bind_rows(.id = "time")) %>% bind_rows(.id = "data"),
+                    sudden = sudden.zipf.fit %>% lapply(function(x) x %>% lapply(function(y) list(alpha = y$alpha)) %>%
+                                                          bind_rows(.id = "time")) %>% bind_rows(.id = "data")) %>%
+  bind_rows(.id = "treatment")
+
+zipf.alphas %>% ggplot() +
+  geom_line(aes(time %>% factor(levels = c(time %>% unique())), alpha, color = treatment, group = data)) +
+  geom_boxplot(aes(time %>% factor(levels = c(time %>% unique())), alpha, color = treatment))
+
+zipf.alphas %>% dplyr::group_by(treatment, time) %>% dplyr::mutate(time := as.numeric(time)) %>%
+  arrange(time) %>% summarise(mean = mean(alpha, na.rm = TRUE), var = sd(alpha, na.rm = TRUE)) %>%
+  ggplot(aes(abs(mean), var, group = treatment, color = treatment)) + geom_point() + geom_path()
+
+zipf.alphas %>% dplyr::group_by(treatment, data) %>% dplyr::mutate(time := as.numeric(time)) %>%
+  arrange(time) %>% summarise(mean = mean(alpha, na.rm = TRUE), var = sd(alpha, na.rm = TRUE)) %>%
+  ggplot(aes(abs(mean), var, group = treatment, color = treatment)) + geom_point()
+
+zipf.alphas.lm <- lm(alpha ~ treatment + time + data, zipf.alphas %>% mutate(time := time %>% as.numeric()))
+zipf.alphas.aov <- zipf.alphas.lm %>% aov()
+
+zipf.alphas.gg <- zipf.alphas %>% ggplot(aes(treatment, alpha)) + geom_boxplot()
 

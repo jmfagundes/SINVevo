@@ -7,24 +7,27 @@ mut.pos <- list(gradual = gradual.mtx,
                   apply(x, 2, function(y) {
                     y <- y[!grepl("\\+|\\-", names(y))]
                     pos <- names(y)[ifelse(y > 0, TRUE, FALSE)] %>% gsub("\\D+", "", .) %>% as.numeric()
-                    genome <- rep(0, 11685)
+                    genome <- rep(0, 11703)
                     genome[pos] <- 1
                     genome
                   }) %>% t() %>% as.data.frame()
                 })
 
-h.exp <- list(gradual = fit.hurst(mut.pos$gradual, d = 1950) %>% bind_rows(.id = "time"),
-              sudden = fit.hurst(mut.pos$sudden, d = 1950) %>% bind_rows(.id = "time")) %>% bind_rows(.id = "treatment")
+h.exp <- list(gradual = fit.hurst(mut.pos$gradual, d = 2000) %>% bind_rows(.id = "time"),
+              sudden = fit.hurst(mut.pos$sudden, d = 2000) %>% bind_rows(.id = "time")) %>% bind_rows(.id = "Treatment") %>%
+  dplyr::mutate(Treatment := Treatment %>%
+                  gsub("^g", "G", .) %>%
+                  gsub("^s", "S", .))
 
-h.exp.gg <- ggplot(h.exp, aes(time %>% factor(levels = time %>% unique()), He, color = treatment)) +
+h.exp.gg <- ggplot(h.exp, aes(time %>% factor(levels = time %>% unique()), He, color = Treatment)) +
   geom_boxplot(outlier.shape = NA) +
   geom_point(position = position_dodge(width = .75)) +
-  xlab("passage") + ylab("He") +
+  xlab("Passage") + ylab( expression(italic("H"))) +
   geom_hline(aes(yintercept = .7), linetype = "dashed")
 
 # test effect of time + sample + data
 
-h.exp.lm <- lm(He ~ treatment + time + data, h.exp %>% mutate(time := time %>% as.numeric()))
+h.exp.lm <- lm(He ~ Treatment + time + data, h.exp %>% mutate(time := time %>% as.numeric()))
 
 # only below a threshold
 
@@ -33,7 +36,7 @@ mut.pos.filter <- list(gradual = gradual.mtx %>% lapply(apply.filter, freq.thres
                          apply(x, 2, function(y) {
                            y <- y[!grepl("\\+|\\-", names(y))]
                            pos <- names(y)[ifelse(y > 0, TRUE, FALSE)] %>% gsub("\\D+", "", .) %>% as.numeric()
-                           genome <- rep(0, 11685)
+                           genome <- rep(0, 11703)
                            genome[pos] <- 1
                            genome
                          }) %>% t() %>% as.data.frame()
@@ -46,13 +49,13 @@ h.exp.filter <- list(gradual = fit.hurst(mut.pos.filter$gradual, d = 2000) %>% b
 
 h.exp.filter[h.exp.filter == 0] <- NA
 
-h.exp.filter.gg <- ggplot(h.exp.filter, aes(time %>% factor(levels = time %>% unique()), He, color = treatment)) +
+h.exp.filter.gg <- ggplot(h.exp.filter, aes(time %>% factor(levels = time %>% unique()), Hrs, color = treatment)) +
   geom_boxplot(outlier.shape = NA) +
   geom_point(position = position_dodge(width = .75)) +
-  xlab("passage") + ylab("He") +
+  xlab("passage") + ylab("Hrs") +
   geom_hline(aes(yintercept = .7), linetype = "dashed")
 
-h.exp.filter.lm <- lm(He ~ treatment + time + data, h.exp.filter %>% mutate(time := time %>% as.numeric()))
+h.exp.filter.lm <- lm(Hrs ~ treatment * time + data, h.exp.filter %>% mutate(time := time %>% as.numeric()))
 
 # pull mutations together by time
 
@@ -95,8 +98,7 @@ h.exp.pop.gg <- ggplot(h.exp.pop, aes(data, He, color = data, group = data)) +
   geom_hline(aes(yintercept = .7), linetype = "dashed")
 
 h.exp.pop.wilcox <- wilcox.test(He ~ data,
-                                h.exp.pop,
-                                paired = FALSE)
+                                h.exp.pop)
 
 h.exp.pop.lm <- lm(He ~ data, h.exp.pop)
 
@@ -107,7 +109,7 @@ mut.cat.pos <- list(gradual = gradual.mtx,
                       apply(x, 2, function(y) {
                         y <- y[!grepl("\\+|\\-", names(y))]
                         pos <- names(y)[ifelse(y > 0, TRUE, FALSE)] %>% gsub("\\D+", "", .) %>% as.numeric()
-                        genome <- rep(0, 11685)
+                        genome <- rep(0, 11703)
                         genome[pos] <- 1
                         genome
                       }) %>% t() %>% as.data.frame() %>% colSums()
@@ -129,7 +131,7 @@ mut.pos.thresh <- list(gradual = gradual.mtx %>% lapply(apply.filter, freq.thres
                          apply(x, 2, function(y) {
                            y <- y[!grepl("\\+|\\-", names(y))]
                            pos <- names(y)[ifelse(y > 0, TRUE, FALSE)] %>% gsub("\\D+", "", .) %>% as.numeric()
-                           genome <- rep(0, 11685)
+                           genome <- rep(0, 11703)
                            genome[pos] <- 1
                            genome
                          }) %>% t() %>% as.data.frame() %>% colSums()
@@ -144,7 +146,14 @@ mut.pos.thresh <- mut.pos.thresh[-1]
 
 h.exp.thresh <- fit.hurst(list(data = mut.pos.thresh), d = 1000) %>% bind_rows(.id = "treatment")
 
+# aggregation from alleles distance
+
+
+
 # make a figure
+
+ggsave("6_hurst1.pdf", h.exp.gg, width = 6.85, height = 4)
+ggsave("6_hurst1.png", h.exp.gg, width = 6.85, height = 4, dpi = 600)
 
 hurst.gg <- ggarrange(h.exp.gg + labs(tag = "a"),
                       h.exp.pop.gg + theme(axis.ticks.x = element_blank(),
@@ -152,4 +161,4 @@ hurst.gg <- ggarrange(h.exp.gg + labs(tag = "a"),
                                            axis.title.y = element_blank()) + labs(tag = "b"),
                       common.legend = TRUE, widths = c(1, .5))
 
-ggsave("hurst.pdf", hurst.gg, width = 6.85, height = 4)
+ggsave("hurst2.pdf", hurst.gg, width = 6.85, height = 4)
