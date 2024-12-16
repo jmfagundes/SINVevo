@@ -4,15 +4,14 @@ source("source_me.R")
 
 pipe <- function(gradual.mtx,
                  sudden.mtx,
-                 remove.zeros = FALSE,
-                 sd.from.max = FALSE) {
+                 remove.zeros = FALSE) {
   
   gradual.TL <- fit.TL(gradual.mtx,
                        zero.rate.threshold = NULL, normalize = FALSE,
-                       remove.zeros = remove.zeros, sd.from.max = sd.from.max)
+                       remove.zeros = remove.zeros)
   sudden.TL <- fit.TL(sudden.mtx,
                       zero.rate.threshold = NULL, normalize = FALSE,
-                      remove.zeros = remove.zeros, sd.from.max = sd.from.max)
+                      remove.zeros = remove.zeros)
   
   # plot parameters
   
@@ -48,7 +47,7 @@ pipe <- function(gradual.mtx,
 
 # fit SNPs frequencies to Taylor's law
 
-TL.classic <- pipe(gradual.mtx, sudden.mtx, FALSE, FALSE)
+TL.classic <- pipe(gradual.mtx, sudden.mtx, FALSE)
 TL.classic$snps.gg <- lapply(TL.classic$snps.gg, function(x) {
   x + xlim(-3, 0) + ylim(-2.5, -.45) +
     theme(legend.position = "none",
@@ -61,17 +60,16 @@ TL.classic$snps.gg <- lapply(TL.classic$snps.gg, function(x) {
 
 pipe.per_0 <- function(n = 1:8,
                        remove.zeros = FALSE,
-                       min.rows = 5,
-                       sd.from.max = FALSE) {
+                       min.rows = 5) {
   
   lapply(setNames(n, nm = as.character(n)), function(x) {
     
     # fit SNPs frequencies to Taylor's law
     
     gradual.TL <- fit.TL(gradual.mtx %>% lapply(apply.filter, x, exact = TRUE),
-                         zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = remove.zeros, min.rows = min.rows, sd.from.max = sd.from.max)
+                         zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = remove.zeros, min.rows = min.rows)
     sudden.TL <- fit.TL(sudden.mtx %>% lapply(apply.filter, x, exact = TRUE),
-                        zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = remove.zeros, min.rows = min.rows, sd.from.max = sd.from.max)
+                        zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = remove.zeros, min.rows = min.rows)
     
     # plot parameters
     
@@ -147,8 +145,7 @@ random.TL.classic <- fit.TL(list(random.2 = random.walk.tb,
 
 pipe.per_0.random <- function(n = 1:8,
                               remove.zeros = FALSE,
-                              min.rows = 5,
-                              sd.from.max = FALSE) {
+                              min.rows = 5) {
   
   lapply(setNames(n, nm = as.character(n)), function(x) {
     
@@ -157,7 +154,7 @@ pipe.per_0.random <- function(n = 1:8,
     fit.TL(list(random.2 = random.walk.tb,
                 random.05 = random.walk.tb.2,
                 random.01 = random.walk.tb.3) %>% lapply(apply.filter, x, exact = TRUE),
-           zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = remove.zeros, min.rows = min.rows, sd.from.max = sd.from.max)
+           zero.rate.threshold = NULL, normalize = FALSE, remove.zeros = remove.zeros, min.rows = min.rows)
   })
 }
 
@@ -307,9 +304,24 @@ cat.mtx <- lapply(list(gradual = gradual.mtx,
 
 # Taylor's law with mutations pulled together but comparing alleles with s < 0 and s > 0
 
-get.mut.s <- function(x, treat, s_ht_0, filter.range = 0) {
+get.mut.s <- function(x, treat, s_ht_0,
+                      filter.range = 0,
+                      within.range = FALSE) {
+  
+  if (within.range) {
+    
+    y <- approxwf.res[approxwf.res$mean_s < filter.range &
+                        approxwf.res$mean_s > -filter.range,]
+    
+    sel.muts <- y[c("population", "allele")]
+    sel.muts <- paste(sel.muts$population, sel.muts$allele, sep = "_")
+    
+    return(x[rownames(x) %in% sel.muts,])
+  }
+  
   y <- approxwf.res[approxwf.res$mean_s >= filter.range |
                       approxwf.res$mean_s <= -filter.range,]
+  
   sel.muts <- y[y$treatment == treat &
                   (y$mean_s > 0) == s_ht_0, c("population", "allele")]
   sel.muts <- paste(sel.muts$population, sel.muts$allele, sep = "_")
@@ -407,7 +419,32 @@ mapply(function(x, y) {
   x %>% get.mut.s("sudden", FALSE)
 }, sudden.mtx %>% setNames(paste0("sudden s < 0 ", names(sudden.mtx))), names(sudden.mtx), SIMPLIFY = FALSE))
 
-# all time points except the ones that lead to loss/fixation
+# first, test absolute difference vs freq
+
+s.TL.time.point.not.fix <- fit.time.sd(s.mtx,
+                                       abs.diff = FALSE,
+                                       return.mean = FALSE, not.fix = FALSE, 
+                                       use.entropy = FALSE,
+                                       logt = FALSE)
+
+s.TL.time.point.not.fix.tb <- s.TL.time.point.not.fix$log_log.mean_sd %>% bind_rows(.id = "data") %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data),
+                s = gsub(".*s ", "s ", data) %>% gsub(" [0-9]*$", "", .))
+
+s.TL.time.point.not.fix.gg <- s.TL.time.point.not.fix.tb %>%
+  dplyr::mutate(treatment := treatment %>%
+                  gsub("^g", "G", .) %>%
+                  gsub("^s", "S", .)) %>%
+  ggplot(aes(mean, sd)) +
+  geom_abline(intercept = 1, slope = -1, color = "green", linewidth = .2) +
+  geom_abline(intercept = 0, slope = -1, color = "red", linewidth = .2) +
+  geom_point(shape = 20, stroke = 0, size = .75) + 
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = .2) +
+  #geom_density_2d(linewidth = .2) +
+  xlab("Frequency") + ylab("Diff") +
+  facet_wrap(~treatment)
+
+# use entropy, all time points except the ones that lead to loss/fixation
 
 s.TL.time.point.not.fix.entropy <- fit.time.sd(s.mtx,
                                                return.mean = FALSE, not.fix = TRUE, 
@@ -438,10 +475,6 @@ s.TL.time.point.not.fix.entropy.params$slope.significant <- s.TL.time.point.not.
 s.TL.time.point.not.fix.entropy.params.slope.sig <- s.TL.time.point.not.fix.entropy.params[s.TL.time.point.not.fix.entropy.params$slope.significant,]
 
 # MANOVA
-# remove outlier?
-
-#s.TL.time.point.no.fix.entropy.I.gamma.manova <- manova(cbind(V, beta) ~ treatment * s + population,
-#                                                        s.TL.time.point.not.fix.entropy.params %>% dplyr::filter(data != "gradual s > 0 116"))
 
 s.TL.time.point.no.fix.entropy.I.gamma.manova <- manova(cbind(V, beta) ~ treatment * s + population,
                                                         s.TL.time.point.not.fix.entropy.params)
@@ -456,15 +489,10 @@ s.TL.time.point.no.fix.entropy.I.gamma.manova.effect_size <- effectsize::effects
 
 s.TL.time.point.no.fix.entropy.I.gamma.manova.summary.aov <- s.TL.time.point.no.fix.entropy.I.gamma.manova %>% summary.aov()
 
-# post-hoc test
+# "post-hoc" lm test
 
 s.TL.time.point.no.fix.entropy.I.gamma.lm.lst <- list(gamma = lm(beta ~ s * treatment + population + V, s.TL.time.point.not.fix.entropy.params),
                                                       I = lm(V ~ s * treatment + population + beta, s.TL.time.point.not.fix.entropy.params))
-
-# mixed model with population as random effect
-
-#s.TL.time.point.no.fix.entropy.I.gamma.lm.lst <- list(gamma = lme4::lmer(beta ~ s * treatment + V + (1|population), s.TL.time.point.not.fix.entropy.params),
-#                                                      I = lme4::lmer(V ~ s * treatment + beta + (1|population), s.TL.time.point.not.fix.entropy.params))
 
 # contrasts
 
@@ -527,65 +555,10 @@ s.TL.time.point.no.fix.entropy.I.gamma.log.gg <- s.TL.time.point.not.fix.entropy
   ylab("gamma (log)") + xlab("I (log)") +
   geom_point() + geom_smooth(method = "lm", se = FALSE) + theme(legend.title = element_blank())
 
-# no outlier
-
-s.TL.time.point.no.fix.entropy.I.gamma.gg <- s.TL.time.point.not.fix.entropy.params %>%
-  dplyr::filter(data != "gradual s > 0 116") %>%
-  ggplot(aes(V, beta, color = paste0(treatment, s))) +
-  ylab("gamma") + xlab("I") +
-  geom_point() + geom_smooth(method = "lm", se = FALSE) + theme(legend.title = element_blank())
-
-s.TL.time.point.no.fix.entropy.I.gamma.boxplot.gg <- s.TL.time.point.not.fix.entropy.params %>% 
-  dplyr::filter(data != "gradual s > 0 116") %>%
-  rename(I = V, gamma = beta) %>%
-  dplyr::select(-c(R.squared, n.cells, n.alleles, model, slope.significant, sparsity, population)) %>%
-  pivot_longer(c(I, gamma)) %>%
-  ggplot(aes(s, value)) + geom_boxplot() + facet_grid(rows = vars(treatment), cols = vars(name), scales = "free")
-
-# compare with shuffled
-
-#sudden.shuffle.mtx <- lapply(setNames(1:1000, nm = paste0("sudden shuffled rep ", 1:1000)), function(x) {
-#  
-#  set.seed(x)
-#  y <- s.mtx[grepl("sudden", names(s.mtx))] %>% bind_rows()
-#  
-#  y[sample(8)]
-#})
-#
-#gradual.shuffle.mtx <- lapply(setNames(1:1000, nm = paste0("gradual shuffled rep ", 1:1000)), function(x) {
-#  
-#  set.seed(x)
-#  y <- s.mtx[grepl("gradual", names(s.mtx))] %>% bind_rows()
-#  
-#  y[sample(8)]
-#})
-#
-#sudden.shuffle.mtx <- c(list(`sudden unshuffled` = s.mtx[grepl("sudden", names(s.mtx))] %>% bind_rows(),
-#                             `gradual unshuffled` = s.mtx[grepl("gradual", names(s.mtx))] %>% bind_rows()),
-#                        sudden.shuffle.mtx,
-#                        gradual.shuffle.mtx)
-#
-#sudden.shuffle.time.point.not.fix.entropy <- fit.time.sd(sudden.shuffle.mtx, return.mean = FALSE, not.fix = TRUE, use.entropy = TRUE)
-
-# plot parameters
-
-sudden.shuffle.time.point.not.fix.entropy$params$shuf <- sudden.shuffle.time.point.not.fix.entropy$params$data %>%
-  gsub(" rep.*", "", .) %>% gsub(".* ", "", .)
-
-sudden.shuffle.time.point.not.fix.entropy$params$treatment <- sudden.shuffle.time.point.not.fix.entropy$params$data %>%
-  gsub(" .*", "", .)
-
-sudden.shuffle.time.point.not.fix.entropy.gg <- sudden.shuffle.time.point.not.fix.entropy$params %>%
-  ggplot(aes(V, beta, color = shuf)) + geom_point() + theme(legend.title = element_blank()) +
-  xlab("I") + ylab("gamma") + facet_wrap(~treatment)
-
 # save figs
 
 hid.gg <- ggarrange(s.TL.time.point.not.fix.entropy.treatment.gg +
                       labs(tag = "a"),
-                      #theme(axis.ticks.x = element_blank(),
-                      #      axis.title.x = element_blank(),
-                      #      axis.text.x = element_blank()),
                     s.TL.time.point.not.fix.entropy.regression_plot +
                       theme(legend.position = "bottom") +
                       labs(tag = "b"),
@@ -597,3 +570,175 @@ ggsave("5_Hid.png", hid.gg,  width = 6.85, height = 6, dpi = 600)
 
 ggsave("Hidgamma_treatment.pdf", s.TL.time.point.not.fix.entropy.treatment.gg, width = 6.85, height = 5)
 ggsave("Hidgamma_regressions.pdf", s.TL.time.point.not.fix.entropy.regression_plot, width = 6.85, height = 4.5)
+
+# by dataset
+
+unified.mtx <- c(mapply(function(x, y) {
+  rownames(x) <- paste(y, rownames(x), sep = "_")
+  x
+}, gradual.mtx %>% setNames(paste0("gradual ", names(gradual.mtx))), names(gradual.mtx), SIMPLIFY = FALSE),
+
+mapply(function(x, y) {
+  rownames(x) <- paste(y, rownames(x), sep = "_")
+  x
+}, sudden.mtx %>% setNames(paste0("sudden ", names(sudden.mtx))), names(sudden.mtx), SIMPLIFY = FALSE))
+
+TL.time.point.not.fix.entropy <- fit.time.sd(unified.mtx,
+                                             return.mean = FALSE, not.fix = TRUE, 
+                                             use.entropy = TRUE)
+
+TL.time.point.not.fix.entropy.tb <- TL.time.point.not.fix.entropy$log_log.mean_sd %>% bind_rows(.id = "data") %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data))
+
+TL.time.point.not.fix.entropy.params <- TL.time.point.not.fix.entropy$params %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data),
+                population = gsub(".* ", "", data))
+
+TL.time.point.not.fix.entropy.params %>% ggplot(aes(treatment, V)) + geom_boxplot() + geom_jitter()
+
+TL.time.point.not.fix.entropy.params.manova <- manova(cbind(V, beta) ~ treatment,
+                                                      TL.time.point.not.fix.entropy.params)
+
+TL.time.point.not.fix.entropy.params.manova.summary <- TL.time.point.not.fix.entropy.params.manova %>% summary()
+
+TL.time.point.not.fix.entropy.params.lm <- list(gamma = lm(beta ~ treatment + V, TL.time.point.not.fix.entropy.params),
+                                                I = lm(V ~ treatment + beta, TL.time.point.not.fix.entropy.params))
+
+# discern negatively selected alleles
+
+# distribution of selection coefficients
+
+approxwf.res.s_distribution.gg <- approxwf.res %>%
+  ggplot(aes(mean_s, color = treatment)) + geom_density() + geom_vline(xintercept = -0.16) + geom_vline(xintercept = 0.16)
+
+# only highly selected alleles
+
+s_16.mtx <- c(mapply(function(x, y) {
+  rownames(x) <- paste(y, rownames(x), sep = "_")
+  x %>% get.mut.s("gradual", TRUE, filter.range = .16)
+}, gradual.mtx %>% setNames(paste0("gradual s >= 0.16 ", names(gradual.mtx))), names(gradual.mtx), SIMPLIFY = FALSE),
+
+mapply(function(x, y) {
+  rownames(x) <- paste(y, rownames(x), sep = "_")
+  x %>% get.mut.s("gradual", FALSE, filter.range = .16)
+}, gradual.mtx %>% setNames(paste0("gradual s <= 0.16 ", names(gradual.mtx))), names(gradual.mtx), SIMPLIFY = FALSE),
+
+mapply(function(x, y) {
+  rownames(x) <- paste(y, rownames(x), sep = "_")
+  x %>% get.mut.s("gradual", filter.range = .16, within.range = TRUE)
+}, gradual.mtx %>% setNames(paste0("gradual -0.16 < s < 0.16 ", names(gradual.mtx))), names(gradual.mtx), SIMPLIFY = FALSE),
+
+mapply(function(x, y) {
+  rownames(x) <- paste(y, rownames(x), sep = "_")
+  x %>% get.mut.s("sudden", TRUE, filter.range = .16)
+}, sudden.mtx %>% setNames(paste0("sudden s >= 0.16 ", names(sudden.mtx))), names(sudden.mtx), SIMPLIFY = FALSE),
+
+mapply(function(x, y) {
+  rownames(x) <- paste(y, rownames(x), sep = "_")
+  x %>% get.mut.s("sudden", FALSE, filter.range = .16)
+}, sudden.mtx %>% setNames(paste0("sudden s <= 0.16 ", names(sudden.mtx))), names(sudden.mtx), SIMPLIFY = FALSE),
+
+
+mapply(function(x, y) {
+  rownames(x) <- paste(y, rownames(x), sep = "_")
+  x %>% get.mut.s("sudden", filter.range = .16, within.range = TRUE)
+}, sudden.mtx %>% setNames(paste0("sudden -0.16 < s < 0.16 ", names(sudden.mtx))), names(sudden.mtx), SIMPLIFY = FALSE))
+
+
+# first, test absolute difference vs freq
+
+s_16.TL.time.point.not.fix <- fit.time.sd(s_16.mtx,
+                                          abs.diff = FALSE,
+                                          return.mean = FALSE, not.fix = FALSE, 
+                                          use.entropy = FALSE,
+                                          logt = FALSE)
+
+s_16.TL.time.point.not.fix.tb <- s_16.TL.time.point.not.fix$log_log.mean_sd %>% bind_rows(.id = "data") %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data),
+                s = gsub("gradual |sudden ", "", data) %>% gsub(" [0-9]*$", "", .))
+
+s_16.TL.time.point.not.fix.gg <- s_16.TL.time.point.not.fix.tb %>%
+  dplyr::mutate(treatment := treatment %>%
+                  gsub("^g", "G", .) %>%
+                  gsub("^s", "S", .)) %>%
+  ggplot(aes(mean, sd, color = s)) +
+  geom_abline(intercept = 1, slope = -1, color = "green", linewidth = .2) +
+  geom_abline(intercept = 0, slope = -1, color = "red", linewidth = .2) +
+  geom_point(shape = 20, stroke = 0, size = 2) + 
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = .2) +
+  #geom_density_2d(linewidth = .2) +
+  xlab("Frequency") + ylab("Diff") +
+  facet_wrap(~treatment) +
+  scale_color_manual(values = scales::hue_pal()(3), 
+                     labels = c("Neutral",
+                                "Negative",
+                                "Positive"),
+                     name = expression(italic(s)))
+
+# use entropy, all time points except the ones that lead to loss/fixation
+
+s_16.TL.time.point.not.fix.entropy <- fit.time.sd(s_16.mtx,
+                                                   return.mean = FALSE, not.fix = TRUE, 
+                                                   use.entropy = TRUE)
+
+s_16.TL.time.point.not.fix.entropy.tb <- s_16.TL.time.point.not.fix.entropy$log_log.mean_sd %>% bind_rows(.id = "data") %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data),
+                s = gsub("gradual |sudden ", "", data) %>% gsub(" [0-9]*$", "", .))
+
+s_16.TL.time.point.not.fix.entropy.params <- s_16.TL.time.point.not.fix.entropy$params %>%
+  dplyr::mutate(treatment = gsub(" .*", "", data),
+                s = gsub("gradual |sudden ", "", data) %>% gsub(" [0-9]*$", "", .),
+                population = gsub(".* ", "", data))
+
+s_16.TL.time.point.no.fix.entropy.I.gamma.manova <- manova(cbind(V, beta) ~ treatment * s + population,
+                                                               s_16.TL.time.point.not.fix.entropy.params)
+
+s_16.TL.time.point.no.fix.entropy.I.gamma.manova.summary <- s_16.TL.time.point.no.fix.entropy.I.gamma.manova %>% summary()
+
+# effect size
+
+s_16.TL.time.point.no.fix.entropy.I.gamma.manova.effect_size <- effectsize::effectsize(s_16.TL.time.point.no.fix.entropy.I.gamma.manova)
+
+# gamma and I separately 
+
+s_16.TL.time.point.no.fix.entropy.I.gamma.manova.summary.aov <- s_16.TL.time.point.no.fix.entropy.I.gamma.manova %>% summary.aov()
+
+# some plots
+
+s_16.TL.time.point.not.fix.entropy.tb %>%
+  dplyr::mutate(treatment := treatment %>%
+                  gsub("^g", "G", .) %>%
+                  gsub("^s", "S", .),
+                population = data %>% gsub(".* ", "", .)) %>%
+  ggplot(aes(mean, sd, color = s, group = data)) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = .2) +
+  #geom_density_2d(aes(group = s)) +
+  geom_point() +
+  xlab(expression(paste(italic(S), " (log)"))) + ylab(expression(paste(italic(d), " (log)"))) +
+  #facet_wrap(~treatment) +
+  facet_wrap(~population) +
+  scale_color_manual(values = scales::hue_pal()(3), 
+                     labels = c("Neutral",
+                                "Negative",
+                                "Positive"),
+                     name = expression(italic(s)))
+
+# "post-hoc" lm test
+
+s_16.TL.time.point.no.fix.entropy.I.gamma.lm.lst <- list(gamma = lm(beta ~ s * treatment + population + V, s_16.TL.time.point.not.fix.entropy.params),
+                                                          I = lm(V ~ s * treatment + population + beta, s_16.TL.time.point.not.fix.entropy.params))
+
+# test only neutral
+
+s_neutral.contrast <- list(gamma = comparisons(s_16.TL.time.point.no.fix.entropy.I.gamma.lm.lst$gamma,
+                                               variables = list(treatment = c("sudden", "gradual")),
+                                               newdata = datagrid(s = "-0.16 < s < 0.16")),
+                           I = comparisons(s_16.TL.time.point.no.fix.entropy.I.gamma.lm.lst$I,
+                                           variables = list(treatment = c("sudden", "gradual")),
+                                           newdata = datagrid(s = "-0.16 < s < 0.16")))
+
+s_neutral.TL.time.point.no.fix.entropy.I.gamma.lm.lst <- list(gamma = lm(beta ~ treatment + V, s_16.TL.time.point.not.fix.entropy.params %>%
+                                                                           filter(s == "-0.16 < s < 0.16")),
+                                                          I = lm(V ~ treatment + beta, s_16.TL.time.point.not.fix.entropy.params %>%
+                                                                   filter(s == "-0.16 < s < 0.16")))
+

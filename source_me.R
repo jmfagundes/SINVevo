@@ -100,19 +100,17 @@ normalize.cells <- function(mtx) {
 #' 
 #' @examples
 fit.TL <- function(matrices,
-                   prefix.xlsx = NULL,
                    zero.rate.threshold = .95,
                    normalize = TRUE,
                    remove.zeros = FALSE,
                    analyze.fluctuation.only = FALSE,
-                   min.rows = NULL,
-                   sd.from.max = FALSE) {
+                   min.rows = NULL) {
   
   params.tb <- data.frame(data = character(),
                           V = numeric(),
                           beta = numeric(),
                           R.squared = numeric(),
-                          n.cells = numeric(),
+                          n.time = numeric(),
                           n.alleles = numeric(),
                           sparsity = numeric(),
                           model = character())
@@ -126,28 +124,6 @@ fit.TL <- function(matrices,
     if (is.null(ncol(allele.mtx))) next
     if (!is.null(min.rows)) if (nrow(allele.mtx) < min.rows) next
     
-    if (!is.null(prefix.xlsx)) {
-      
-      # if too many cells, save three different subset files of 5000 cells
-      
-      if (ncol(allele.mtx) > 10000) {
-        
-        set.seed(12345)
-        rep <- allele.mtx[sample(ncol(allele.mtx), 5000)]
-        write_xlsx(cbind(" " = rownames(rep), rep), paste0("cmplxcruncher_analysis/", prefix.xlsx, "_", m, "_rep_1", ".xlsx"))
-        
-        set.seed(1000)
-        rep <- allele.mtx[sample(ncol(allele.mtx), 5000)]
-        write_xlsx(cbind(" " = rownames(rep), rep), paste0("cmplxcruncher_analysis/", prefix.xlsx, "_", m, "_rep_2", ".xlsx"))
-        
-        set.seed(255)
-        rep <- allele.mtx[sample(ncol(allele.mtx), 5000)]
-        write_xlsx(cbind(" " = rownames(rep), rep), paste0("cmplxcruncher_analysis/", prefix.xlsx, "_", m, "_rep_3", ".xlsx"))
-        
-      } else {
-        write_xlsx(cbind(" " = rownames(allele.mtx), allele.mtx), paste0("cmplxcruncher_analysis/", prefix.xlsx, "_", m, ".xlsx"))
-      }
-    }
     if (!is.null(zero.rate.threshold)) {
       
       zero.rate.alleles <- calc.0_rate(list(mtx = allele.mtx))$mtx
@@ -159,12 +135,10 @@ fit.TL <- function(matrices,
     
     if (remove.zeros) {
       mean_sd <- data.frame(mean = apply(allele.mtx, 1, function(x) {
-        if (sd.from.max) max(x[x > 0])
-        else mean(x[x > 0])
+        mean(x[x > 0])
       }),
       sd = apply(allele.mtx, 1, function(x) {
-        if (sd.from.max) sqrt(sum((x[x > 0] - max(x))**2)/(length(x) - 1))
-        else sd(x[x > 0])
+        sd(x[x > 0])
       }))
       mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
       
@@ -178,14 +152,8 @@ fit.TL <- function(matrices,
       mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
       
     } else {
-      mean_sd <- data.frame(mean = apply(allele.mtx, 1, function(x) {
-        if (sd.from.max) max(x)
-        else mean(x)
-      }),
-      sd = apply(allele.mtx, 1, function(x) {
-        if (sd.from.max) sqrt(sum((x - max(x))**2)/(length(x) - 1))
-        else sd(x)
-      }))
+      mean_sd <- data.frame(mean = rowMeans(allele.mtx, na.rm = TRUE),
+      sd = apply(allele.mtx, 1, sd, na.rm = TRUE))
       mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
     }
     
@@ -379,7 +347,8 @@ shannon.entropy.lst <- function(obs) {
 #' 
 #' @examples
 calc.entropy <- function(alt.freq.lst,
-                         return.sum = TRUE) {
+                         return.sum = TRUE,
+                         normalize = TRUE) {
   
   if (sum(alt.freq.lst) == 0) return(0)
   
@@ -405,6 +374,7 @@ calc.entropy <- function(alt.freq.lst,
     shannon.entropy(c(snps, ref.freq))
   })
   
+  #if (normalize) return(sum(entropies %>% unlist()) / length(entropies))
   if (return.sum) sum(entropies %>% unlist()) %>% return()
   else return(entropies)
 }
@@ -450,6 +420,7 @@ calc.afd <- function(AF.tb) {
 #' 
 #' @param matrices Input matrices
 #' @param next.point Use deviation from next point
+#' @param abs.diff Use absolute difference
 #' @param return.mean Returns the mean value of each allele
 #' @param not.fix Do not analyse differences that lead to the loss/fixation of an allele
 #' @param fix Only analyse alleles that are fixed
@@ -464,6 +435,7 @@ calc.afd <- function(AF.tb) {
 #' @examples
 fit.time.sd <- function(matrices,
                         next.point = TRUE,
+                        abs.diff = TRUE,
                         return.mean = TRUE,
                         not.fix = FALSE,
                         fix = FALSE,
@@ -476,7 +448,7 @@ fit.time.sd <- function(matrices,
                           V = numeric(),
                           beta = numeric(),
                           R.squared = numeric(),
-                          n.cells = numeric(),
+                          n.time = numeric(),
                           n.alleles = numeric(),
                           sparsity = numeric(),
                           model = character())
@@ -495,8 +467,14 @@ fit.time.sd <- function(matrices,
     
     if (not.fix) x[x == 0 | x == 1] <- NA 
 
-    d.x <- apply(x, 1, diff) %>% abs() %>% t() %>% as.data.frame()
+    if (abs.diff) {
+      d.x <- apply(x, 1, diff) %>%
+        abs() %>%
+        t() %>% as.data.frame()
+    } else d.x <- apply(x, 1, diff) %>%
+        t() %>% as.data.frame()
     
+    if (all(is.na(d.x))) next
     if (use.entropy) x <- x %>% mutate_all(function(y) {
       
       lapply(y, function(z) {
@@ -517,8 +495,8 @@ fit.time.sd <- function(matrices,
       
       mean_sd <- data.frame(mean = rowMeans(x),
                             sd = rowMeans(d.x ** 2))
-        
-      mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
+      
+      mean_sd <- mean_sd[mean_sd$mean != 0 & mean_sd$sd != 0,]
       
       log_log.mean_sd <- log(mean_sd)
       lm.log_log.mean_sd <- lm(sd ~ mean, data = log_log.mean_sd)
@@ -546,7 +524,7 @@ fit.time.sd <- function(matrices,
                          sd = stack(d.x)$values,
                          name = rownames(x))
       
-      v_sd <- v_sd[v_sd$mean > 0 & v_sd$sd > 0 & !is.na(v_sd$sd),]
+      v_sd <- v_sd[v_sd$mean != 0 & v_sd$sd != 0 & !is.na(v_sd$sd),]
       
       if (logt) v_sd <- log(v_sd[c("mean", "sd")]) %>% cbind(v_sd["name"])
       
