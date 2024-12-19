@@ -54,8 +54,10 @@ afd.anc.gg <- anc.diff.tb %>% ggplot() +
   geom_line(aes(Passage, `Total AFD`, group = rep, color = rep)) +
   facet_wrap(~Treatment) + theme(legend.position = "none")
 
-afd.gg <- ggarrange(afd.abs.gg + ggtitle("Concecutive passages") + theme(axis.title = element_blank()),
-                    afd.anc.gg + ggtitle("Difference to ancestral") + theme(axis.title = element_blank()),
+afd.gg <- ggarrange(afd.abs.gg + ggtitle("Concecutive passages") +
+                      theme(axis.title = element_blank(), title = element_text(size = 6)),
+                    afd.anc.gg + ggtitle("Difference to ancestral") +
+                      theme(axis.title = element_blank(), title = element_text(size = 6)),
                     ncol = 1) %>% annotate_figure(left = "Total AFD", bottom = "Passage")
 
 # consecutive vs difference to ancestral
@@ -74,9 +76,6 @@ afd.cor.gg <- afd.anc_consec.tb %>%
               data = afd.anc_consec.tb,
               se = FALSE, method = "lm", linetype = "dashed", linewidth = .5)
 
-ggsave("2_afd.pdf", afd.gg, width = 6.85, height = 6)
-ggsave("2_afd.png", afd.gg, width = 6.85, height = 6, dpi = 600)
-
 # richness
 
 richness.tb <- list(Gradual = gradual.mtx,
@@ -87,28 +86,21 @@ richness.tb <- list(Gradual = gradual.mtx,
   rename(Passage = name, Richness = value)
 
 richness.boxplot.gg <- richness.tb %>%
-  ggplot(aes(Passage %>% as.numeric(), Richness, group = interaction(Treatment, Passage), color = Population)) +
-  geom_boxplot(outlier.fill = ) +
-  geom_line(aes(group = Population)) +
+  ggplot(aes(Passage %>% factor(levels = c("4", "7", "10", "13", "16", "19", "22", "25")), Richness, group = interaction(Treatment, Passage))) +
+  geom_boxplot(outlier.size = 0) +
+  geom_line(aes(group = Population, color = Population)) +
   facet_wrap(~Treatment) +
-  ylab("Richness")
-
-richness.mean.sd.total.afd.gg <- list(`Concecutive passages (total AFD)` = abs.diff.tb,
-                                      `Difference to ancestral (total AFD)` = anc.diff.tb) %>% bind_rows(.id = "data") %>%
-  mutate(Passage := Passage %>% gsub(".*-", "", .) %>% as.numeric()) %>%
-  pivot_wider(values_from = `Total AFD`, names_from = data) %>% group_by(Treatment, Passage) %>%
-  summarise(mean_consecutive = mean(`Concecutive passages (total AFD)`),
-            mean_ancestral = mean(`Difference to ancestral (total AFD)`),
-            sd_consecutive = sd(`Concecutive passages (total AFD)`),
-            sd_ancestral = sd(`Difference to ancestral (total AFD)`)) %>%
-  ggplot(aes(mean_ancestral, mean_consecutive, color = Treatment)) +
-  geom_point() + geom_path()
+  theme(legend.position = "none") +
+  ylab("Richness") + xlab("Passage")
 
 # normalize AFD by richness
 
 afd.anc_consec.richness.tb <- bind_cols(afd.anc_consec.tb, richness.tb["Richness"]) %>%
   dplyr::mutate(`Concecutive passages (mean AFD)` = `Concecutive passages (total AFD)` / Richness,
                 `Difference to ancestral (mean AFD)` = `Difference to ancestral (total AFD)` / Richness)
+
+mean.afd.aov <- list(Consecutive = aov(lm(`Concecutive passages (mean AFD)` ~ Treatment * Passage + rep, afd.anc_consec.richness.tb)),
+                     Ancestral = aov(lm(`Difference to ancestral (mean AFD)` ~ Treatment * Passage + rep, afd.anc_consec.richness.tb)))
 
 mean.afd.consec.gg <- afd.anc_consec.richness.tb %>%
   dplyr::select(Treatment, rep, Passage, `Concecutive passages (mean AFD)`) %>%
@@ -148,20 +140,19 @@ total.afd.cor.gg <- afd.anc_consec.richness.tb %>%
               data = afd.anc_consec.richness.tb,
               se = FALSE, method = "lm", linetype = "dashed", linewidth = .5)
 
-mean.afd.cor.gg.2 <- afd.anc_consec.richness.tb %>%
-  ggplot(aes(`Difference to ancestral (mean AFD)`, `Concecutive passages (mean AFD)`, color = rep, group = rep)) +
-  geom_point(data = afd.anc_consec.richness.tb %>% filter(Passage == 4)) +
-  geom_path(arrow = arrow(angle = 20, type = "closed", length = unit(.2, "cm"))) +
-  coord_equal() +
-  geom_smooth(aes(`Difference to ancestral (mean AFD)`, `Concecutive passages (mean AFD)`, color = Treatment, group = Treatment),
-              data = afd.anc_consec.richness.tb,
-              se = FALSE, method = "lm", linetype = "dashed", linewidth = .5, color = "black") +
-  facet_wrap(~Treatment) +
-  theme(legend.position = "none")
-
-mean.afd.gg <- ggarrange(mean.afd.consec.gg + ggtitle("Concecutive passages") + theme(axis.title = element_blank()),
-                         mean.afd.anc.gg + ggtitle("Difference to ancestral") + theme(axis.title = element_blank()),
+mean.afd.gg <- ggarrange(mean.afd.consec.gg + ggtitle("Concecutive passages") +
+                           theme(axis.title = element_blank(), title = element_text(size = 10)),
+                         mean.afd.anc.gg + ggtitle("Difference to ancestral") +
+                           theme(axis.title = element_blank(), title = element_text(size = 10)),
                          ncol = 1) %>% annotate_figure(left = "Mean AFD", bottom = "Passage")
+
+mean.afd.richness.gg <- ggarrange(mean.afd.gg %>% annotate_figure(fig.lab = "a"),
+                                  (richness.boxplot.gg + theme(axis.title = element_blank())) %>%
+                                    annotate_figure(left = "Richness", bottom = "Passage") %>%
+                                    annotate_figure(fig.lab = "b"), ncol = 1, heights = (c(1, .5)))
+
+ggsave("2_afd.pdf", mean.afd.richness.gg, width = 6.85, height = 8)
+ggsave("2_afd.png", mean.afd.richness.gg, width = 6.85, height = 8, dpi = 600)
 
 # without last passage gradual
 
@@ -196,24 +187,7 @@ afd.anc_consec.richness.density <- afd.anc_consec.richness.tb %>%
   geom_density_2d(aes(`Concecutive passages (mean AFD)`, Richness, color = Treatment)) +
   geom_point()
 
-afd.anc_consec.richness.mean.gg <- afd.anc_consec.richness.tb %>% group_by(Treatment, Passage) %>%
-  summarise(sd_consecutive = sd(`Concecutive passages (mean AFD)`),
-            sd_richness = sd(Richness),
-            `Concecutive passages (mean AFD)` = mean(`Concecutive passages (mean AFD)`),
-            Richness = mean(Richness)) %>%
-  ggplot(aes(`Concecutive passages (mean AFD)`, Richness, color = Treatment)) +
-  geom_point() +
-  geom_path()
-
-# wilcox
-
-richness.22.25.gradual.tb <- richness.tb %>% dplyr::filter(Treatment == "Gradual" & Passage %in% c(22, 25)) %>%
-  dplyr::mutate(Richness = Richness %>% as.numeric()) %>%
-  pivot_wider(names_from = Passage, values_from = Richness)
-
-richness.tb.wilcox <- wilcox.test(richness.22.25.gradual.tb$`22`, richness.22.25.gradual.tb$`25`, alternative = "greater", paired = TRUE)
-
-t.test(richness.22.25.gradual.tb$`22`, richness.22.25.gradual.tb$`25`, alternative = "greater", paired = TRUE)
+# t-tests
 
 t.test.gradual <- list()
 for (i in 1:7) {
@@ -221,7 +195,7 @@ for (i in 1:7) {
     pivot_wider(names_from = Passage, values_from = Richness) %>% dplyr::select(-c(Treatment, Population)) %>%
     t.test(.[i] %>% pull(), .[i + 1] %>% pull(), paired = TRUE, data = .)
 }
-t.test.gradual %>% lapply(function(x) print(x$p.value))
+t.test.gradual %>% lapply(function(x) x$p.value)
 
 t.test.sudden <- list()
 for (i in 1:7) {
@@ -229,14 +203,4 @@ for (i in 1:7) {
     pivot_wider(names_from = Passage, values_from = Richness) %>% dplyr::select(-c(Treatment, Population)) %>%
     t.test(.[i] %>% pull(), .[i + 1] %>% pull(), paired = TRUE, data = .)
 }
-t.test.sudden %>% lapply(function(x) print(x$p.value))
-
-# richness vs Shannon
-
-shannon.tb <-  entropy.mtx %>% pivot_longer(-c(Treatment, Passage)) %>%
-  filter(!is.na(value))
-
-shannon.richness.tb <- afd.anc_consec.richness.tb %>%
-  merge(x = ., y = shannon.tb, by.x = c("Treatment", "rep", "Passage"), by.y = c("Treatment", "name", "Passage"))
-
-shannon.richness.tb %>% ggplot(aes(Richness, value, color = Treatment)) + geom_point() + facet_wrap(~rep)
+t.test.sudden %>% lapply(function(x) x$p.value)

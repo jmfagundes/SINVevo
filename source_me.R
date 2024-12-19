@@ -44,7 +44,7 @@ sudden.mtx <- lapply(setNames(1:9, nm = c(2, 5, 6,
 approxwf.res <- list(gradual = lapply(setNames(nm = c(98, 101, 102,
                                                       106, 107, 109,
                                                       112, 115, 116) %>% as.character()), function(x) {
-                                                        y <- read.table(paste0("SE_results/Results/Gradual.", x, "_res.csv"),
+                                                        y <- read.table(paste0("approxwfout/Gradual.", x, "_res.csv"),
                                                                         sep = ",", header = TRUE)
                                                         y$allele <- rownames(gradual.mtx[[as.character(x)]])
                                                         y
@@ -52,7 +52,7 @@ approxwf.res <- list(gradual = lapply(setNames(nm = c(98, 101, 102,
                      sudden = lapply(setNames(nm = c(2, 5, 6,
                                                      10, 11, 13,
                                                      16, 19, 20) %>% as.character()), function(x) {
-                                                       y <- read.table(paste0("SE_results/Results/Sudden.", x, "_res.csv"),
+                                                       y <- read.table(paste0("approxwfout/Sudden.", x, "_res.csv"),
                                                                        sep = ",", header = TRUE)
                                                        y$allele <- rownames(sudden.mtx[[as.character(x)]])
                                                        y
@@ -218,7 +218,8 @@ plot.power_law <- function(log_log.mean_sd.matrices,
                            alleles.metadata.lst = NULL,
                            legend.title = NULL,
                            metadata.range = c(0, 1),
-                           l10 = TRUE) {
+                           l10 = TRUE,
+                           shadow = NULL) {
   
   log_log.df <- log_log.mean_sd.matrices %>% bind_rows(.id = "title")
   log_log.df$alleles <- lapply(1:length(log_log.mean_sd.matrices),
@@ -242,6 +243,18 @@ plot.power_law <- function(log_log.mean_sd.matrices,
     if (is.null(metadata.range)) log_log.df$value <- as.factor(log_log.df$value)
     
     gg <- ggplot(log_log.df, aes(mean, sd, color = value))
+  }
+  
+  if (!is.null(shadow)) {
+    
+    shadow.ll <- shadow %>% bind_rows(.id = "title")
+    shadow.ll$title <- factor(shadow.ll$title, levels = names(shadow))
+    
+    if (l10) shadow.ll <- shadow.ll %>% mutate(mean = log10(exp(mean)), sd = log10(exp(sd)))
+    
+    gg <- gg + geom_point(aes(mean, sd),
+                          data = shadow.ll,
+                          colour = "grey", shape = 20, stroke = 0, size = 1.2)
   }
   
   gg <- gg + facet_wrap(~title) +

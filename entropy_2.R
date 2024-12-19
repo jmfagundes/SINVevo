@@ -37,12 +37,10 @@ entropy.TL.params <- entropy.TL %>% lapply(function(x) x$params) %>% bind_rows(.
 entropy.TL.params %>% ggplot(aes(Treatment, beta)) + geom_boxplot()
 entropy.TL.params %>% ggplot(aes(Treatment, V)) + geom_boxplot()
 
+wilcox.test(entropy.TL$Gradual$params$beta, entropy.TL$Sudden$params$beta)
 t.test(entropy.TL$Gradual$params$beta, entropy.TL$Sudden$params$beta)
 
 lm(beta ~ Treatment + V, entropy.TL.params)
 lm(V ~ Treatment + beta, entropy.TL.params)
 
 manova(cbind(V, beta) ~ Treatment, entropy.TL.params)
-
-# calculate entropy per ORF
-
