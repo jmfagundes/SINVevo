@@ -1,17 +1,17 @@
 # Genetic shifts in viral populations: how sudden vs gradual changes in host species composition affect the stability and dynamics of genetic variability in viral populations
 
 ### Description
-R scripts to analyze data of evolving populations of Sindbis virus under different rates of host replacement.
+R scripts to analyse data of evolving populations of Sindbis virus under different rates of host replacement.
 
 ### Overview
-To run the analysis, processed data (approxwf results and allele frequency tables in .xlsx format) must be obtained from the [Zenodo repository](https://zenodo.org/) and the contents of the tar.gz file must be extracted here.
+To run the analyses, processed data (approxwf results and allele frequency tables in .xlsx format) must be obtained from the [Zenodo repository](https://zenodo.org/) and the folders inside the tar.gz file must be placed here.
 
 #### Contents
 ##### source_me.R
-Loading of the data and main functions.
+Loading of the data and main functions. Looks for .xlsx files under data.
 
 ##### approxwf_analysis.R
-Plot and analyze population parameters estimated with approxwf. Look for files in approxwfout/.
+Plot and analyze population parameters estimated with approxwf. Looks for files in approxwfout/.
 
 ##### allele_freq_diff.R
 Analysis of mean allele frequency differences and richness through passages.
