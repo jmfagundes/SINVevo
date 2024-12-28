@@ -3,26 +3,40 @@
 ### Description
 R scripts to analyse data of evolving populations of Sindbis virus under different rates of host replacement.
 
+_Work available as preprint in BioRxiv as:_
+
+[Joao M.F. Silva, Maria J. Olmo-Uceda, Valerie J. Morley, Paul E. Turner, Santiago F. Elena (2024) Genetic shifts in viral populations: how sudden vs gradual changes in host species composition affect the stability and dynamics of genetic variability in viral populations](https://www.biorxiv.org/content/10.1101/2024.12.27.630372v1).
+
 ### Overview
 To run the analyses, processed data (approxwf results and allele frequency tables in .xlsx format) must be obtained from the [Zenodo repository](https://zenodo.org/) and the folders inside the tar.gz file must be placed here.
 
 #### Contents
-##### source_me.R
-Loading of the data and main functions. Looks for .xlsx files under data.
+---
+* __source_me.R__
+  
+  Loading of the data and main functions. Looks for .xlsx files under data.
 
-##### approxwf_analysis.R
-Plot and analyze population parameters estimated with approxwf. Looks for files in approxwfout/.
+* __approxwf_analysis.R__
+  
+  Plot and analyze population parameters estimated with approxwf. Looks for files in approxwfout/.
 
-##### allele_freq_diff.R
-Analysis of mean allele frequency differences and richness through passages.
+* __allele_freq_diff.R__
+  
+  Analysis of mean allele frequency differences and richness through passages.
 
-##### fluctuation_scaling.R
-Analysis of allele fluctuations across passages. Fits to Taylor's law and related analyses.
+* __fluctuation_scaling.R__
+  
+  Analysis of allele fluctuations across passages. Fits to Taylor's law and related analyses.
 
-##### hurst.R
-Analysis of persistent behavior on the placement of mutations.
+* __gain_fitness.R__
+  
+  Re-analysis of the gain of fitness (original data from [Morley et al., 2015](https://royalsocietypublishing.org/doi/10.1098/rspb.2015.0801)) focused on whether or not evolution in a treatment leads to a significant difference in fitness presented in the two cell types. Plot and statistics.
 
-The analysis was performed on the following R environment:
+* __hurst.R__
+
+  Analysis of persistent behavior on the placement of mutations.
+---
+The analysis was performed on the following __R environment__:
 
 ```
 > sessionInfo()
