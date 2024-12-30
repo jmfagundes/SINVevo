@@ -18,9 +18,9 @@ pipe <- function(gradual.mtx,
   snps.TL.params <- rbind(gradual.TL$params[-1] %>% cbind(data = "gradual"),
                           sudden.TL$params[-1] %>% cbind(data = "sudden"))
 
-  snps.TL.param.gg <- ggplot(snps.TL.params, aes(V, beta, color = data)) +
-    geom_point() +
-    geom_smooth(method = "lm", formula = y ~ x)
+  snps.TL.param.gg <- ggplot(snps.TL.params) +
+    geom_point(aes(V, beta, color = data)) +
+    geom_smooth(aes(V, beta, color = data), method = "lm", formula = y ~ x)
   
   # Taylor's plot
   
@@ -137,9 +137,9 @@ random.walk.tb.3 <- lapply(setNames(nm = 1:1000), function(x) {
   y
 }) %>% bind_rows() %>% t() %>% as.data.frame()
 
-random.TL.classic <- fit.TL(list(random.2 = random.walk.tb,
-                                 random.05 = random.walk.tb.2,
-                                 random.01 = random.walk.tb.3),
+random.TL.classic <- fit.TL(list(`Random 0.2` = random.walk.tb,
+                                 `Random 0.05` = random.walk.tb.2,
+                                 `Random 0.01` = random.walk.tb.3),
                             zero.rate.threshold = NULL, normalize = FALSE,
                             remove.zeros = FALSE)
 
@@ -160,20 +160,6 @@ pipe.per_0.random <- function(n = 1:8,
 
 random.TL.per_0 <- pipe.per_0.random()
 
-# random fluctuations
-
-walks.gg <- list(`random 2` = random.walk.tb,
-                 `random 0.05` = random.walk.tb.2,
-                 `random 0.01` = random.walk.tb.3) %>% lapply(function(x) {
-                   
-                   t(x) %>% as.data.frame() %>% dplyr::mutate(t = 1:8) %>%
-                     pivot_longer(-t)
-                   
-                 }) %>% bind_rows(.id = "data") %>% ggplot(aes(t, value, group = name)) +
-  geom_line(linewidth = .05) +
-  facet_wrap(~data) +
-  xlab("Passage") + ylab("Frequency")
-
 # join the plots
 
 V.beta.per_0.tb <- lapply(TL.per.zero, function(x) {
@@ -192,7 +178,7 @@ facet.V.beta.gg <- V.beta.per_0.tb %>% mutate(treatment := factor(treatment %>%
                                                                     gsub("^r", "R", .))) %>%
   ggplot(aes(V, beta, color = n)) +
   geom_point(size = .5) + geom_smooth(method = "lm", se = FALSE, linewidth = .2) + facet_wrap(~treatment) +
-  ylab(expression(italic("\u03B2"))) + xlab(expression(italic("V")))
+  ylab(expression(italic("\u03B2"[n]))) + xlab(expression(italic("V"[n])))
 
 # where are the SNPs?
 
@@ -217,31 +203,29 @@ location.SNPs.gg <- lapply(list(gradual = gradual.mtx,
 # Taylor's plots
 
 snps.taylor.gg <- ggarrange(TL.classic$snps.gg$gradual + ggtitle("Gradual") +
-                              theme(axis.title = element_blank()) ,
+                              theme(axis.title = element_blank()) +
+                              geom_text(aes(x = -.5, y = -2.8, label = paste0(round(V, 2), ", ", round(beta, 2))),
+                                        color = "black", size = 2,
+                                        data = TL.classic$TL$gradual$params %>%
+                                          dplyr::rename(title = data)),
                             TL.classic$snps.gg$sudden + ggtitle("Sudden") +
                               theme(axis.title = element_blank(),
                                     axis.ticks.y = element_blank(),
-                                    axis.text.y = element_blank()),
+                                    axis.text.y = element_blank()) +
+                              geom_text(aes(x = -.5, y = -2.8, label = paste0(round(V, 2), ", ", round(beta, 2))),
+                                        color = "black", size = 2,
+                                        data = TL.classic$TL$sudden$params %>%
+                                          dplyr::rename(title = data)),
                             nrow = 1,
                             common.legend = TRUE,
                             legend.grob = get_legend(facet.V.beta.gg + geom_point(shape = 15, size = 6) +
                                                        theme(legend.direction = "horizontal") + guides(colour = guide_legend(nrow = 1)) +
                                                        scale_color_manual(values = scales::hue_pal()(8),
                                                                           name = expression(italic(n)))),
-                            legend = "top", widths = c(1, .94)) %>% annotate_figure(left = "Standard deviation (log)", bottom = "Mean (log)")
+                            legend = "top", widths = c(1, .94)) %>% annotate_figure(left = "Allele frequency standard deviation (log)", bottom = "Allele frequency mean (log)")
 
 ggsave("4_snps_TL.pdf", snps.taylor.gg, width = 6.85, height = 4)
-ggsave("4_snps_TL.png", snps.taylor.gg, width = 6.85, height = 4, dpi = 600)
-
-# random walks
-
-random.TL.gg <- plot.power_law(random.TL.classic$log_log.mean_sd,
-                               list(random.2 = random.walk.tb,
-                                    random.05 = random.walk.tb.2,
-                                    random.01 = random.walk.tb.3) %>% calc.0_rate(),
-                               metadata.range = NULL, legend.title = "0 rate", l10 = TRUE) +
-  xlab("mean (log)") + ylab("standard deviation (log)") +
-  geom_smooth(method = "lm", se = FALSE, linewidth = .1) 
+ggsave("4_snps_TL.tiff", snps.taylor.gg, width = 6.85, height = 4, dpi = 600)
 
 params.location.gg <- ggarrange(facet.V.beta.gg +
                                   labs(tag = "a") +
@@ -265,7 +249,86 @@ params.location.gg <- ggarrange(facet.V.beta.gg +
                                 legend = "bottom", heights = c(.8, 1))
 
 ggsave("5_params_TL.pdf", params.location.gg, width = 6.85, height = 4.75)
-ggsave("5_params_TL.png", params.location.gg, width = 6.85, height = 4.75, dpi = 600)
+ggsave("5_params_TL.tiff", params.location.gg, width = 6.85, height = 4.75, dpi = 600)
+
+# random fluctuations
+
+random.TL.gg <- plot.power_law(random.TL.classic$log_log.mean_sd,
+                               list(`Random 0.2` = random.walk.tb,
+                                    `Random 0.05` = random.walk.tb.2,
+                                    `Random 0.01` = random.walk.tb.3) %>% calc.0_rate(),
+                               metadata.range = NULL, legend.title = "0 rate", l10 = TRUE) +
+  xlab("Mean (log)") + ylab("Standard deviation (log)") +
+  geom_smooth(method = "lm", se = FALSE, linewidth = .1) +
+  geom_smooth(aes(mean, sd), method = "lm", se = FALSE, color = "black", linewidth = .1) +
+  scale_color_discrete(direction = -1) +
+  geom_text(aes(x = -.5, y = -2.8, label = paste0(round(V, 2), ", ", round(beta, 2))),
+            color = "black", size = 2,
+            data = random.TL.classic$params %>%
+              dplyr::rename(title = data))
+
+walks.gg <- list(`Random 0.2` = random.walk.tb,
+                 `Random 0.05` = random.walk.tb.2,
+                 `Random 0.01` = random.walk.tb.3) %>% lapply(function(x) {
+                   
+                   t(x) %>% as.data.frame() %>% dplyr::mutate(t = 1:8) %>%
+                     pivot_longer(-t)
+                   
+                 }) %>% bind_rows(.id = "data") %>% ggplot(aes(t, value, group = name)) +
+  geom_line(linewidth = .05) +
+  facet_wrap(~data) +
+  xlab("Passage") + ylab("Frequency")
+
+# save partial supplementary figure
+
+set.seed(101)
+
+example.n8.distributions <- data.frame(a = rnorm(8, .01, .001),
+                                       b.1 = c(rep(.1, 7), 1),
+                                       b.4 = c(rep(.1, 4), rep(1, 4)),
+                                       b.7 = c(.1, rep(1, 7)),
+                                       
+                                       
+                                       c.1 = c(rep(.5, 7), 1),
+                                       c.4 = c(rep(.5, 4), rep(1, 4)),
+                                       c.7 = c(.5, rep(1, 7)),
+                                       
+                                       d.1 = c(rep(.9, 7), 1),
+                                       d.4 = c(rep(.9, 4), rep(1, 4)),
+                                       d.7 = c(.9, rep(1, 7))) %>% t() %>% as.data.frame()
+
+example.n8.distributions.TL <- fit.TL(list(Distributions = example.n8.distributions), zero.rate.threshold = NULL, normalize = FALSE)
+
+example.n8.distributions.gg <- ggarrange(example.n8.distributions.TL$log_log.mean_sd$Distributions %>%
+                                           mutate(., Allele = rownames(.),
+                                                  Group = rownames(.) %>% gsub("\\..*", "", .),
+                                                  n1 = rownames(.) %>% gsub(".*\\.", "", .)) %>%
+                                           ggplot(aes(mean, sd, color = Group)) +
+                                           geom_point() +
+                                           ylab("Standard deviation (log)") + xlab("Mean (log)"),
+                                         example.n8.distributions %>% t() %>% as.data.frame() %>% dplyr::mutate(t = 1:8) %>%
+                                           pivot_longer(-t) %>%
+                                           mutate(., Allele = name,
+                                                  Group = name %>% gsub("\\..*", "", .),
+                                                  n1 = name %>% gsub(".*\\.", "", .)) %>%
+                                           ggplot(aes(t, value, group = name, color = Group)) +
+                                           geom_line(linewidth = .2) +
+                                           xlab("Passage") + ylab("Frequency"),
+                                         common.legend = TRUE, legend = "top")
+
+random.gg <- ggarrange(example.n8.distributions.gg %>% annotate_figure(fig.lab = "a"),
+                       walks.gg %>% annotate_figure(fig.lab = "b"),
+                       ggarrange(random.TL.gg, common.legend = TRUE, legend = "bottom",
+                                 legend.grob = get_legend(facet.V.beta.gg + geom_point(shape = 15, size = 6) +
+                                                            theme(legend.direction = "horizontal") +
+                                                            guides(colour = guide_legend(nrow = 1)) +
+                                                            scale_color_manual(values = scales::hue_pal()(8),
+                                                                               name = expression(italic(n))))) %>%
+                         annotate_figure(fig.lab = "c"),
+                       ncol = 1, heights = c(.8, .6, 1))
+
+ggsave("s1_random.pdf", random.gg, width = 6.85, height = 7)
+ggsave("s1_random.tiff", random.gg, width = 6.85, height = 7, dpi = 600)
 
 # MANOVA
 
@@ -303,6 +366,19 @@ beta = lapply(setNames(nm = 2:8), function(x) {
               variables = list(treatment = c("sudden", "gradual")),
               newdata = datagrid(n = x))
 }))
+
+# random effects
+
+V.beta.lm.random.lst <- list(V = nlme::lme(V ~ treatment * n + beta,
+                                           random = ~ 1|data,
+                                           V.beta.per_0.tb %>%
+                                             mutate(n := as.numeric(n)) %>%
+                                             dplyr::filter(treatment %in% c("gradual", "sudden"))),
+                             beta = nlme::lme(beta ~ treatment * n + V,
+                                              random = ~ 1|data,
+                                              V.beta.per_0.tb %>%
+                                                mutate(n := as.numeric(n)) %>%
+                                                dplyr::filter(treatment %in% c("gradual", "sudden"))))
 
 # wilcoxon test
 
@@ -397,12 +473,16 @@ cat.s_16.TL.gg <- plot.power_law(cat.s_16.TL$log_log.mean_sd,
                                                `Sudden positive` = cat.mtx.TL$log_log.mean_sd$sudden,
                                                `Sudden negative` = cat.mtx.TL$log_log.mean_sd$sudden,
                                                `Sudden neutral` = cat.mtx.TL$log_log.mean_sd$sudden)) +
-  xlab("Mean (log)") + ylab("Standard deviation (log)") +
+  xlab("Allele frequency mean (log)") + ylab("Allele frequency standard deviation (log)") +
   geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = .2) +
   scale_color_manual(values = scales::hue_pal()(8),
                      name = expression(italic(n))) +
   facet_wrap(~title) +
-  geom_smooth(aes(mean, sd), method = "lm", formula = y ~ x, se = FALSE, linewidth = .1, color = "black")
+  geom_smooth(aes(mean, sd), method = "lm", formula = y ~ x, se = FALSE, linewidth = .1, color = "black") +
+  geom_text(aes(x = -.5, y = -2.8, label = paste0(round(V, 2), ", ", round(beta, 2))),
+            color = "black", size = 2,
+            data = cat.s_16.TL$params %>%
+              dplyr::rename(title = data))
 
 cat.s_16.TL.per_0.tb <- cat.s_16.TL.per_0 %>% lapply(function(x) x$TL$params) %>%
   bind_rows(.id = "n") %>%
@@ -415,17 +495,18 @@ cat.s_16.TL.params.gg <- cat.s_16.TL.per_0.tb %>%
 
 cat.s_16.TL.per_0.V.beta.gg <- cat.s_16.TL.per_0.tb %>%
   pivot_longer(c(V, beta)) %>%
-  mutate(name := name %>% gsub("beta", "\u03B2", .),
+  mutate(name := name %>% factor(levels = c("V", "beta")),
          s := s %>% gsub("^n", "N", .) %>% gsub("^p", "P", .)) %>%
   ggplot(aes(s, value)) +
-  facet_grid(name ~ treatment, scales = "free_y", switch = "y") +
+  facet_grid(name ~ treatment, scales = "free_y", switch = "y",
+             labeller = as_labeller(c(V = "italic(V[n])", beta = "italic(\u03B2[n])", Gradual = "Gradual", Sudden = "Sudden"),  label_parsed)) +
   geom_boxplot(outlier.size = 0) +
   geom_point(aes(color = n)) +
   theme(axis.title.y = element_blank(),
-        strip.background = element_blank(),
+        strip.background.y = element_blank(),
         strip.placement = "outside",
-        strip.text.y = element_text(face = "italic"),
-        axis.title.x = element_blank())
+        axis.title.x = element_blank(), legend.position = "none") +
+  geom_pwc(aes(group = s), method = "wilcox.test", label = "p.signif", hide.ns = "p.signif", vjust = .68, tip.length = 0)
 
 # lm test
 
@@ -455,9 +536,10 @@ TL.s.gg <- ggarrange((approxwf.res.s_distribution.gg + theme(legend.position = "
                                                           theme(legend.direction = "horizontal") + guides(colour = guide_legend(nrow = 1)) +
                                                           scale_color_manual(values = scales::hue_pal()(8),
                                                                              name = expression(italic(n)))),
-                               legend = "bottom") %>%
+                               legend = "top") %>%
                        annotate_figure(fig.lab = "b"),
-                     ncol = 1, heights = c(.7, 1))
+                     cat.s_16.TL.per_0.V.beta.gg %>% annotate_figure(fig.lab = "c"),
+                     ncol = 1, heights = c(.5, 1, .75))
 
-ggsave("6_s_fluctuation.pdf", TL.s.gg, width = 6.85, height = 6)
-ggsave("6_s_fluctuation.png", TL.s.gg, width = 6.85, height = 6, dpi = 600)
+ggsave("6_s_fluctuation.pdf", TL.s.gg, width = 6.85, height = 9)
+ggsave("6_s_fluctuation.tiff", TL.s.gg, width = 6.85, height = 9, dpi = 600)

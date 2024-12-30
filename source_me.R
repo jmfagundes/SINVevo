@@ -3,13 +3,13 @@ library(tidyr)
 library(ggplot2)
 library(writexl)
 library(readxl)
-library(segmented)
+#library(segmented)
 library(ggpubr)
 library(viridis)
 library(ggrepel)
 #library(randtests)
-library(igraph)
-library(minpack.lm)
+#library(igraph)
+#library(minpack.lm)
 library(pracma)
 library(statcomp)
 library(grid)
@@ -58,10 +58,6 @@ approxwf.res <- list(gradual = lapply(setNames(nm = c(98, 101, 102,
                                                        y
                                                      }) %>% bind_rows(.id = "population")) %>%
   bind_rows(.id = "treatment")
-
-# some ggplot themes
-
-blank.theme <- theme(strip.text = element_text(hjust = 0, size = 12))
 
 # functions
 
@@ -278,36 +274,36 @@ plot.power_law <- function(log_log.mean_sd.matrices,
 #' 
 #' @return A table with the results
 fit.hurst <- function(matrices,
-                      gene.lst = NULL,
-                      d = 50) {
+                      allele.lst = NULL,
+                      d = 50,
+                      remove.zeros = FALSE) {
   
   hurst.fit <- list()
   
-  if (is.null(gene.lst)) {
-    gene.lst <- lapply(matrices, rownames) %>% unlist() %>% unique() %>% as.character()
+  if (is.null(allele.lst)) {
+    allele.lst <- lapply(matrices, rownames) %>% unlist() %>% unique() %>% as.character()
   }
   
-  for (gene in gene.lst) {
+  for (allele in allele.lst) {
     H.lst <- mapply(function(x, y) {
       
-      if (!gene %in% rownames(x)) {
-        message(paste0("gene ", gene, " not found in matrix ", y, ", returning NA"))
+      if (!allele %in% rownames(x)) {
+        message(paste0("allele ", allele, " not found in matrix ", y, ", returning NA"))
         return(list(data = y, Hrs = NA, Ht = NA, Hal = NA, He = NA))
         
-      } else c(data = y, hurstexp(x[gene,] %>% unlist(), display = FALSE, d))
+      } else {
+        series <- x[allele,] %>% unlist()
+        if (remove.zeros) series <- series[series > 0]
+        
+        c(data = y, hurstexp(series, display = FALSE, d))
+      }
     }, matrices, names(matrices), SIMPLIFY = FALSE) %>% bind_rows()
-    hurst.fit[[gene]] <- H.lst
+    hurst.fit[[allele]] <- H.lst
   }
   return(hurst.fit)
 }
 
 # filters for reconstructing haplotypes
-
-# only include SNPs present in at least n.time points
-n.time <- 1
-
-# filter SNPs that never reach freq.thresh
-freq.thresh <- .03
 
 #' apply.filter
 #' 
@@ -339,14 +335,16 @@ apply.filter <- function(x,
 }
 
 #' shannon.entropy
+#' 
+#' Calculate Shannon entropy from a list of frequencies
+#' 
+#' @param freq.lst List of frequencies
+#' 
+#' @return Shannon entropy
+#' @export
+#' 
+#' @examples
 shannon.entropy <- function(freq.lst) -sum(lapply(freq.lst, function(x) x * log(x, 2)) %>% unlist())
-
-shannon.entropy.lst <- function(obs) {
-  freq <- table(obs) / length(obs)
-  vec <- as.data.frame(freq)[,2]
-  vec < -vec[vec > 0]
-  -sum(vec * log2(vec))
-}
 
 #' calc.entropy
 #' 
@@ -355,7 +353,7 @@ shannon.entropy.lst <- function(obs) {
 #' @param alt.freq.list List of alternative allele frequencies
 #' @param return.sum Return the sum of the entropies
 #' 
-#' @return Shannon entropy sum
+#' @return Shannon entropy sum or list of entropies
 #' @export
 #' 
 #' @examples

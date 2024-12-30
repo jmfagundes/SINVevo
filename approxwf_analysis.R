@@ -9,15 +9,30 @@ cistrons <- list(UTR = c(1:59, 7602:7646, 11385:11703),
 approxwf.res$position <- approxwf.res$allele %>% gsub("[A-Z\\+\\*\\-]*", "", .) %>% as.numeric()
 approxwf.res$cistron <- approxwf.res$position %>% lapply(function(x) names(cistrons)[lapply(cistrons, function(y) x %in% y) %>% unlist()]) %>% unlist()
 
+# add p-values
+
+wilcox.p.tb <- approxwf.res %>% 
+  dplyr::select(treatment, mean_s, mean_Ne, cistron) %>%
+  pivot_longer(c(mean_Ne, mean_s)) %>% group_by(cistron, name) %>%
+  summarise(wilcox.p = wilcox.test(value ~ treatment)$p.value) %>%
+  dplyr::mutate(`p.signif` = case_when(wilcox.p <= 0.0001 ~ "****",
+                                       wilcox.p <= 0.001 ~ "***",
+                                       wilcox.p <= 0.01 ~ "**",
+                                       wilcox.p <= 0.05 ~ "*",
+                                       wilcox.p > 0.05 ~ NA),
+                y = case_when(name == "mean_Ne" ~ max(approxwf.res$mean_Ne),
+                              name == "mean_s" ~ max(approxwf.res$mean_s)))
+
 set.seed(255)
 
 s.ne.cistron.gg <- approxwf.res %>% 
   dplyr::select(treatment, mean_s, mean_Ne, cistron) %>%
   pivot_longer(c(mean_Ne, mean_s)) %>%
-  ggplot(aes(cistron %>% factor(levels = names(cistrons)), value, color = treatment)) +
+  ggplot(data = .) +
   xlab("Cistron") +
-  geom_boxplot(outliers = FALSE) +
-  geom_jitter(position = position_jitterdodge(dodge.width = .75), alpha = .3, size = .5) +
+  geom_boxplot(aes(cistron %>% factor(levels = names(cistrons)), value, color = treatment), outliers = FALSE) +
+  geom_jitter(aes(cistron %>% factor(levels = names(cistrons)), value, color = treatment),
+              position = position_jitterdodge(dodge.width = .75), alpha = .3, size = .5) +
   facet_wrap(~name %>% factor(levels = c("mean_s", "mean_Ne")), scales = "free_y",
              strip.position = "left",
              labeller = as_labeller(c(mean_Ne = "N\u2091", mean_s = "s")),
@@ -29,10 +44,11 @@ s.ne.cistron.gg <- approxwf.res %>%
         strip.text = element_text(face = "italic")) +
   scale_color_manual(values = scales::hue_pal()(2), 
                      labels = c("Gradual", "Sudden"),
-                     name = "Treatment")
+                     name = "Treatment") +
+  geom_text(aes(cistron, y = y, label = p.signif), wilcox.p.tb)
 
 ggsave("1_s_ne.pdf", s.ne.cistron.gg, width = 6.85, height = 4.5)
-ggsave("1_s_ne.png", s.ne.cistron.gg, width = 6.85, height = 4.5, dpi = 600)
+ggsave("1_s_ne.tiff", s.ne.cistron.gg, width = 6.85, height = 4.5, dpi = 600)
 
 # MANOVA
 
@@ -48,6 +64,11 @@ mean_s.Ne.manova.summary.aov <- mean_s.Ne.manova %>% summary.aov()
 
 mean_s.lm <- lm(mean_s ~ treatment + cistron + as.factor(population), approxwf.res)
 mean_Ne.lm <- lm(mean_Ne ~ treatment + cistron + as.factor(population), approxwf.res)
+
+# random effects and interaction
+
+mean_s.lm.random <- nlme::lme(mean_s ~ treatment * cistron, random = ~ 1|as.factor(population), approxwf.res)
+mean_Ne.lm.random <- nlme::lme(mean_Ne ~ treatment * cistron, random = ~1|as.factor(population), approxwf.res)
 
 # cistron effect by treatment
 
