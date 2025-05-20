@@ -5,7 +5,7 @@ library(ggsci)
 library(scales)
 library(dplyr)
 library(tidyverse)
-library(gt)x
+#library(gtx)
 library(knitr)
 library(kableExtra)
 library(magrittr)
@@ -23,19 +23,19 @@ treatment.colors <- c("Control" = "#2E2A2BFF",
 
 # Original data from Morley, 2015
 fitness <- read.csv("Fitness_Assay_Data.csv",
-                    sep = ";")
+                    sep = ",")
 
 fitness$Treatment[is.na(fitness$Treatment)] <- 0
 
 # Only interested treatments:
 fitness <- fitness %>%
-  filter(Treatment %in% c(0, 1, 5, 6)) %>%
-  # Calculate mean values from block meassurment
+  filter(Treatment %in% c(0, 1, 5, 6) & !is.na(Passage)) %>%
+  # Calculate mean values from block measurement
   rowwise() %>%
   mutate(BHK_titer.mean = mean(BHK_Titer_Block1, BHK_Titer_Block2, BHK_Titer_Block3),
          CHO_titer.mean = mean(CHO_Titer_Block1, CHO_Titer_Block2, CHO_Titer_Block3),
          Passage = factor(Passage),
-         Treatment = factor(Treatment)) 
+         Treatment = factor(Treatment))
 
 # Fitness of the ANCESTRAL VIRUS in each cell type
 anc.BHK.fitness.mean <- mean(fitness %>%
@@ -68,9 +68,7 @@ fitness %>%
                             labels = c("Ancestral", "Gradual", "Sudden", "Control"))) %>%
   
   ggplot(aes(x = cell.type, 
-             y = changes, 
-             color = Treatment, 
-             group = interaction(cell.type, Treatment))) +
+             y = changes)) +
   geom_hline(yintercept = 0,
              linewidth = 0.2,
              lty = "dotted") +
@@ -82,10 +80,13 @@ fitness %>%
                linewidth = 0.2,
                outlier.size = 0) +
   # Lines connecting dots for each population (lineage)
-  geom_line(aes(group = Population),
+  geom_line(aes(color = Treatment,
+                group = Population),
             linewidth = 0.1) +
   # Points
-  geom_jitter(aes(#group = interaction(cell.type, Treatment),
+  geom_jitter(aes(
+    color = Treatment, 
+    group = interaction(cell.type, Treatment),
     shape = Treatment), 
     position = position_jitterdodge(jitter.width = 0.1, 
                                     jitter.height = 0,
@@ -100,24 +101,35 @@ fitness %>%
   scale_x_discrete(labels = c("change.fitness.BHK" = "BHK", 
                               "change.fitness.CHO" = "CHO")) +  
   labs(#title = "Effect of the evolution in the fitness",
-       #subtitle = "(fitness"[evolved] - "fitness"[ancestral] ~ ")",
-       y = expression("Changes in fitness (pfu m"^-1 ~ ")"),
-       x = "Cell type",
-       #caption = "Wilcoxon rank test (pasired by lineages)"
-       ) + 
+    #subtitle = "(fitness"[evolved] - "fitness"[ancestral] ~ ")",
+    y = expression("Changes in fitness (pfu mL"^-1 ~ ")"),
+    x = "Cell type",
+    #caption = "Wilcoxon rank test (pasired by lineages)"
+  ) + 
   theme(#panel.border = element_rect(color = "black", fill = "transparent"),
     axis.text = element_text(color = "black"),
-    )
+  ) +
+  stat_compare_means(aes(x = cell.type, 
+                         y = changes), comparisons = list(c("change.fitness.BHK", "change.fitness.CHO")),
+                     method = "wilcox.test", paired = TRUE, label = "p.signif", hide.ns = TRUE,
+                   step.increase = 0, tip.length = 0, bracket.size = 0, vjust = 1) +
+  common.theme + theme(strip.text = element_text(size = 12))
 
 ggsave("3_fitness.pdf",
        width = 6.85,
        height = 2.5)
 
+ggsave("3_fitness.tiff",
+       dpi = 600,
+       width = 6.85,
+       height = 2.5)
+
+
 ################################################################################
 # STATS fitness gain per treatment
 ################################################################################
 ## Wilcoxon signed rank 
-fitness %>%
+wilcox.p.tb <- fitness %>%
   filter(Treatment != 0) %>%  # Exclude the ancestral group (Treatment == 0)
   mutate(Treatment = factor(Treatment, 
                             levels = c(6, 1, 5), 
@@ -161,7 +173,7 @@ fitness %>%
     range_BHK = max(change.fitness.BHK) - min(change.fitness.BHK),
     range_CHO = max(change.fitness.CHO) - min(change.fitness.CHO)
   ) %>% 
-  dplyr::select(c("Treatment", "pvalue", "Z", "median_difference", "fold_change", "log2_fold_change", "r")) %>%
+  dplyr::select(c("Treatment", "pvalue", "Z", "median_difference", "fold_change", "log2_fold_change", "r")) #%>%
   kable(col.names = c("Treatment", "pvalue", "Z", "median_difference", "fold_change", "log2_fold_change", "r"),
         caption = "Wilcoxon signed rank (repeated measures)", 
         escape = FALSE) %>%

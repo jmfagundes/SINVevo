@@ -22,7 +22,7 @@ h.exp <- list(gradual = fit.hurst(mut.pos$gradual, d = 2000) %>% bind_rows(.id =
 # compute p-values
 
 h.exp.wilcox.p <- h.exp %>% group_by(time) %>%
-  summarise(wilcox.p = t.test(He ~ Treatment)$p.value) %>%
+  summarise(wilcox.p = wilcox.test(He ~ Treatment)$p.value) %>%
   dplyr::mutate(`p.signif` = case_when(wilcox.p <= 0.0001 ~ "****",
                                        wilcox.p <= 0.001 ~ "***",
                                        wilcox.p <= 0.01 ~ "**",
@@ -36,7 +36,8 @@ h.exp.gg <- ggplot(h.exp, aes(time %>% factor(levels = time %>% unique()), He, c
   geom_point(position = position_dodge(width = .75)) +
   xlab("Passage") + ylab( expression(italic("H"))) +
   geom_hline(aes(yintercept = .7), linetype = "dashed") +
-  geom_text(aes(time, y = y, label = p.signif), h.exp.wilcox.p, inherit.aes = FALSE)
+  geom_text(aes(time, y = y, label = p.signif), h.exp.wilcox.p, inherit.aes = FALSE) +
+  common.theme + theme(strip.text = element_text(size = 12))
 
 h.exp.facet_gg <- ggplot(h.exp, aes(time %>% factor(levels = time %>% unique()), He)) +
   geom_boxplot(outlier.shape = NA) +

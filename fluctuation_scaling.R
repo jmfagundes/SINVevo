@@ -28,7 +28,7 @@ pipe <- function(gradual.mtx,
     plot.power_law(x,
                    y %>% calc.0_rate(),
                    metadata.range = NULL, legend.title = "0 rate", l10 = TRUE) +
-      xlab("mean (log)") + ylab("standard deviation (log)") +
+      xlab("mean (log)") + ylab("variance (log)") +
       geom_smooth(method = "lm", se = FALSE, linewidth = .1) 
       
   },
@@ -49,7 +49,7 @@ pipe <- function(gradual.mtx,
 
 TL.classic <- pipe(gradual.mtx, sudden.mtx, FALSE)
 TL.classic$snps.gg <- lapply(TL.classic$snps.gg, function(x) {
-  x + xlim(-3, 0) + ylim(-3.2, -.45) +
+  x + xlim(-3, 0) + ylim(-6.4, -.45) +
     theme(legend.position = "none",
           strip.text = element_text(size = 6)) +
     geom_smooth(aes(mean, sd), method = "lm", se = FALSE, color = "black", linewidth = .1) +
@@ -86,7 +86,7 @@ pipe.per_0 <- function(n = 1:8,
       plot.power_law(x,
                      y %>% calc.0_rate(),
                      metadata.range = c(0, 1), legend.title = "0 rate", l10 = TRUE) +
-        xlab("mean (log)") + ylab("standard deviation (log)") +
+        xlab("mean (log)") + ylab("variance (log)") +
         geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red") +
         ggtitle(z)
     },
@@ -177,8 +177,10 @@ facet.V.beta.gg <- V.beta.per_0.tb %>% mutate(treatment := factor(treatment %>%
                                                                     gsub("^s", "S", .) %>%
                                                                     gsub("^r", "R", .))) %>%
   ggplot(aes(V, beta, color = n)) +
-  geom_point(size = .5) + geom_smooth(method = "lm", se = FALSE, linewidth = .2) + facet_wrap(~treatment) +
-  ylab(expression(italic("\u03B2"[n]))) + xlab(expression(italic("V"[n])))
+  geom_point(size = .5) + geom_smooth(method = "lm", se = FALSE, linewidth = .2) +
+  facet_wrap(~treatment, scales = "free_x") +
+  ylab(expression(italic("\u03B2"[n]))) +
+  xlab(expression(italic("V"[n])))
 
 # where are the SNPs?
 
@@ -203,37 +205,44 @@ location.SNPs.gg <- lapply(list(gradual = gradual.mtx,
 # Taylor's plots
 
 snps.taylor.gg <- ggarrange(TL.classic$snps.gg$gradual + ggtitle("Gradual") +
+                              common.theme +
                               theme(axis.title = element_blank()) +
-                              geom_text(aes(x = -.5, y = -2.8, label = paste0(round(V, 2), ", ", round(beta, 2))),
-                                        color = "black", size = 2,
+                              geom_text(aes(x = -.6, y = -5.8, label = paste0(round(V, 2), ", ", round(beta, 2))),
+                                        color = "black", size = 3,
                                         data = TL.classic$TL$gradual$params %>%
                                           dplyr::rename(title = data)),
                             TL.classic$snps.gg$sudden + ggtitle("Sudden") +
-                              theme(axis.title = element_blank(),
-                                    axis.ticks.y = element_blank(),
-                                    axis.text.y = element_blank()) +
-                              geom_text(aes(x = -.5, y = -2.8, label = paste0(round(V, 2), ", ", round(beta, 2))),
-                                        color = "black", size = 2,
+                              common.theme +
+                              theme(axis.title = element_blank()) +
+                                    #axis.ticks.y = element_blank(),
+                                    #axis.text.y = element_blank()) +
+                              geom_text(aes(x = -.5, y = -5.8, label = paste0(round(V, 2), ", ", round(beta, 2))),
+                                        color = "black", size = 3,
                                         data = TL.classic$TL$sudden$params %>%
                                           dplyr::rename(title = data)),
-                            nrow = 1,
+                            nrow = 2,
                             common.legend = TRUE,
                             legend.grob = get_legend(facet.V.beta.gg + geom_point(shape = 15, size = 6) +
                                                        theme(legend.direction = "horizontal") + guides(colour = guide_legend(nrow = 1)) +
                                                        scale_color_manual(values = scales::hue_pal()(8),
                                                                           name = expression(italic(n)))),
-                            legend = "top", widths = c(1, .94)) %>% annotate_figure(left = "Allele frequency standard deviation (log)", bottom = "Allele frequency mean (log)")
+                            legend = "top"#, widths = c(1, .94)
+                            ) %>% annotate_figure(left = "Allele frequency variance (log)", bottom = "Allele frequency mean (log)")
 
-ggsave("4_snps_TL.pdf", snps.taylor.gg, width = 6.85, height = 4)
-ggsave("4_snps_TL.tiff", snps.taylor.gg, width = 6.85, height = 4, dpi = 600)
+ggsave("4_snps_TL.pdf", snps.taylor.gg, width = 6.85, height = 8) # 4
+ggsave("4_snps_TL.tiff", snps.taylor.gg, width = 6.85, height = 8, dpi = 600)
 
 params.location.gg <- ggarrange(facet.V.beta.gg +
                                   labs(tag = "a") +
-                                  theme(legend.position = "none") +
-                                  theme(plot.margin = unit(c(5.5, 13.5, 5.5, 5.5), "pt")),
+                                  common.theme +
+                                  theme(strip.text = element_text(size = 12),
+                                        legend.position = "none",
+                                        plot.margin = unit(c(5.5, 13.5, 5.5, 5.5), "pt")),
                                 print(location.SNPs.gg +
                                         labs(tag = "b") +
-                                        theme(legend.position = "none",
+                                        common.theme +
+                                        theme(strip.text = element_text(size = 12),
+                                              legend.position = "none",
                                               axis.text.y.right = element_blank(),
                                               axis.ticks.y.right = element_blank()) +
                                         ylim(0, 85) +
@@ -248,8 +257,8 @@ params.location.gg <- ggarrange(facet.V.beta.gg +
                                                                               name = expression(italic(n)))),
                                 legend = "bottom", heights = c(.8, 1))
 
-ggsave("5_params_TL.pdf", params.location.gg, width = 6.85, height = 4.75)
-ggsave("5_params_TL.tiff", params.location.gg, width = 6.85, height = 4.75, dpi = 600)
+ggsave("5_params_TL.pdf", params.location.gg, width = 6.85, height = 7)
+ggsave("5_params_TL.tiff", params.location.gg, width = 6.85, height = 7, dpi = 600)
 
 # random fluctuations
 
@@ -258,12 +267,12 @@ random.TL.gg <- plot.power_law(random.TL.classic$log_log.mean_sd,
                                     `Random 0.05` = random.walk.tb.2,
                                     `Random 0.01` = random.walk.tb.3) %>% calc.0_rate(),
                                metadata.range = NULL, legend.title = "0 rate", l10 = TRUE) +
-  xlab("Mean (log)") + ylab("Standard deviation (log)") +
+  xlab("Mean (log)") + ylab("Variance (log)") +
   geom_smooth(method = "lm", se = FALSE, linewidth = .1) +
   geom_smooth(aes(mean, sd), method = "lm", se = FALSE, color = "black", linewidth = .1) +
   scale_color_discrete(direction = -1) +
-  geom_text(aes(x = -.5, y = -2.8, label = paste0(round(V, 2), ", ", round(beta, 2))),
-            color = "black", size = 2,
+  geom_text(aes(x = -.5, y = -5.8, label = paste0(round(V, 2), ", ", round(beta, 2))),
+            color = "black", size = 3,
             data = random.TL.classic$params %>%
               dplyr::rename(title = data))
 
@@ -305,7 +314,7 @@ example.n8.distributions.gg <- ggarrange(example.n8.distributions.TL$log_log.mea
                                                   n1 = rownames(.) %>% gsub(".*\\.", "", .)) %>%
                                            ggplot(aes(mean, sd, color = Group)) +
                                            geom_point() +
-                                           ylab("Standard deviation (log)") + xlab("Mean (log)"),
+                                           ylab("Variance (log)") + xlab("Mean (log)"),
                                          example.n8.distributions %>% t() %>% as.data.frame() %>% dplyr::mutate(t = 1:8) %>%
                                            pivot_longer(-t) %>%
                                            mutate(., Allele = name,
@@ -316,9 +325,16 @@ example.n8.distributions.gg <- ggarrange(example.n8.distributions.TL$log_log.mea
                                            xlab("Passage") + ylab("Frequency"),
                                          common.legend = TRUE, legend = "top")
 
-random.gg <- ggarrange(example.n8.distributions.gg %>% annotate_figure(fig.lab = "a"),
-                       walks.gg %>% annotate_figure(fig.lab = "b"),
-                       ggarrange(random.TL.gg, common.legend = TRUE, legend = "bottom",
+random.gg <- ggarrange((example.n8.distributions.gg +
+                          common.theme +
+                          theme(strip.text = element_text(size = 12))) %>% annotate_figure(fig.lab = "a"),
+                       (walks.gg +
+                          common.theme +
+                          theme(strip.text = element_text(size = 12))) %>% annotate_figure(fig.lab = "b"),
+                       ggarrange(random.TL.gg +
+                                   common.theme +
+                                   theme(strip.text = element_text(size = 12)),
+                                 common.legend = TRUE, legend = "bottom",
                                  legend.grob = get_legend(facet.V.beta.gg + geom_point(shape = 15, size = 6) +
                                                             theme(legend.direction = "horizontal") +
                                                             guides(colour = guide_legend(nrow = 1)) +
@@ -473,14 +489,14 @@ cat.s_16.TL.gg <- plot.power_law(cat.s_16.TL$log_log.mean_sd,
                                                `Sudden positive` = cat.mtx.TL$log_log.mean_sd$sudden,
                                                `Sudden negative` = cat.mtx.TL$log_log.mean_sd$sudden,
                                                `Sudden neutral` = cat.mtx.TL$log_log.mean_sd$sudden)) +
-  xlab("Allele frequency mean (log)") + ylab("Allele frequency standard deviation (log)") +
+  xlab("Allele frequency mean (log)") + ylab("Allele frequency variance (log)") +
   geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = .2) +
   scale_color_manual(values = scales::hue_pal()(8),
                      name = expression(italic(n))) +
   facet_wrap(~title) +
   geom_smooth(aes(mean, sd), method = "lm", formula = y ~ x, se = FALSE, linewidth = .1, color = "black") +
-  geom_text(aes(x = -.5, y = -2.8, label = paste0(round(V, 2), ", ", round(beta, 2))),
-            color = "black", size = 2,
+  geom_text(aes(x = -.5, y = -5.8, label = paste0(round(V, 2), ", ", round(beta, 2))),
+            color = "black", size = 3,
             data = cat.s_16.TL$params %>%
               dplyr::rename(title = data))
 
@@ -529,16 +545,25 @@ cat.s_16.manova.summary.aov <- cat.s_16.manova %>% summary.aov()
 
 # save fig
 
-TL.s.gg <- ggarrange((approxwf.res.s_distribution.gg + theme(legend.position = "top")) %>%
+TL.s.gg <- ggarrange((approxwf.res.s_distribution.gg +
+                        common.theme +
+                        theme(legend.position = "top")) %>%
                        annotate_figure(fig.lab = "a"),
-                     ggarrange(cat.s_16.TL.gg, common.legend = TRUE,
+                     ggarrange(cat.s_16.TL.gg +
+                                 common.theme +
+                                 theme(strip.text = element_text(size = 12)),
+                               common.legend = TRUE,
                                legend.grob = get_legend(facet.V.beta.gg + geom_point(shape = 15, size = 6) +
-                                                          theme(legend.direction = "horizontal") + guides(colour = guide_legend(nrow = 1)) +
+                                                          common.theme +
+                                                          theme(legend.direction = "horizontal") +
+                                                          guides(colour = guide_legend(nrow = 1)) +
                                                           scale_color_manual(values = scales::hue_pal()(8),
                                                                              name = expression(italic(n)))),
                                legend = "top") %>%
                        annotate_figure(fig.lab = "b"),
-                     cat.s_16.TL.per_0.V.beta.gg %>% annotate_figure(fig.lab = "c"),
+                     (cat.s_16.TL.per_0.V.beta.gg +
+                        common.theme +
+                        theme(strip.text = element_text(size = 12))) %>% annotate_figure(fig.lab = "c"),
                      ncol = 1, heights = c(.5, 1, .75))
 
 ggsave("6_s_fluctuation.pdf", TL.s.gg, width = 6.85, height = 9)

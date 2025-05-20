@@ -59,6 +59,14 @@ approxwf.res <- list(gradual = lapply(setNames(nm = c(98, 101, 102,
                                                      }) %>% bind_rows(.id = "population")) %>%
   bind_rows(.id = "treatment")
 
+# common ggplot theme
+
+common.theme <- theme(axis.title = element_text(size = 12),
+                      axis.text = element_text(size = 10),
+                      legend.title = element_text(size = 12),
+                      legend.text = element_text(size = 10),
+                      plot.title = element_text(size = 14))
+
 # functions
 
 # return allele abundances
@@ -83,13 +91,11 @@ normalize.cells <- function(mtx) {
 #' Fit matrices in a list to Taylor's law
 #' 
 #' @param matrices List of matrices
-#' @param prefix.xlsx Prefix of .xlsx files for cmplxcruncher. If NULL, don't save xlsx files
 #' @param zero.rate.threshold Filter out alleles with percentage of zeros higher than zero.rate.threshold
 #' @param normalize Boolean. Whether to transform the matrices to abundance matrix by performing cell size normalization
 #' @param remove.zeros Do not include zeros when calculating mean and standard deviation
 #' @param analyze.fluctuation.only Only analyze the fluctuation of mutations that reach fixation (removes all zeros and ones then add one zero and one one)
 #' @param min.rows Skip matrix with number of elements (rows) < min.rows
-#' @param sd.from.max Calculate max ~ sd from max
 #' 
 #' @return A list of the Taylor's parameters, the linear models and the log-transformed mean and standard deviation data
 #' @export
@@ -134,7 +140,7 @@ fit.TL <- function(matrices,
         mean(x[x > 0])
       }),
       sd = apply(allele.mtx, 1, function(x) {
-        sd(x[x > 0])
+        sd(x[x > 0]) ** 2
       }))
       mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
       
@@ -143,13 +149,13 @@ fit.TL <- function(matrices,
         mean(c(x[x > 0 & x < 1], 0 ,1))
       }),
       sd = apply(allele.mtx, 1, function(x) {
-        sd(c(x[x > 0 & x < 1], 0 ,1))
+        sd(c(x[x > 0 & x < 1], 0 ,1)) ** 2
       }))
       mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
       
     } else {
       mean_sd <- data.frame(mean = rowMeans(allele.mtx, na.rm = TRUE),
-      sd = apply(allele.mtx, 1, sd, na.rm = TRUE))
+      sd = apply(allele.mtx, 1, function(x) sd(x, na.rm = TRUE) ** 2))
       mean_sd <- mean_sd[mean_sd$mean > 0 & mean_sd$sd > 0,]
     }
     
@@ -425,136 +431,3 @@ calc.afd <- function(AF.tb) {
   return(afd)
 }
 
-#' fit.time.sd
-#' 
-#' Calculate deviation from next/previous point to investigate systemic deterministic behavior
-#' 
-#' @param matrices Input matrices
-#' @param next.point Use deviation from next point
-#' @param abs.diff Use absolute difference
-#' @param return.mean Returns the mean value of each allele
-#' @param not.fix Do not analyse differences that lead to the loss/fixation of an allele
-#' @param fix Only analyse alleles that are fixed
-#' @param use.entropy Use the entropy of an allele (summing the frequencies of all other alternative allele)
-#' @param use.quasi.entropy Use -freq * log(freq, 2)
-#' @param remove.indels Remove indels. Set to TRUE if use.entropy = TRUE
-#' @param logt Power-law relationship
-#' 
-#' @return A list with the results with same names as fit.TL for compatibility
-#' @export
-#' 
-#' @examples
-fit.time.sd <- function(matrices,
-                        next.point = TRUE,
-                        abs.diff = TRUE,
-                        return.mean = TRUE,
-                        not.fix = FALSE,
-                        fix = FALSE,
-                        use.entropy = FALSE,
-                        use.quasi.entropy = FALSE,
-                        remove.indels = FALSE,
-                        logt = TRUE) {
-  
-  params.tb <- data.frame(data = character(),
-                          V = numeric(),
-                          beta = numeric(),
-                          R.squared = numeric(),
-                          n.time = numeric(),
-                          n.alleles = numeric(),
-                          sparsity = numeric(),
-                          model = character())
-  log_log.mean_sd.lst <- list()
-  lm.lst <- list()
-  
-  for (m in names(matrices)) {
-    
-    x <- matrices[[m]]
-    
-    if (fix) x <- x %>% apply.filter(freq.thresh = 1)
-
-    if (nrow(x) == 0) next
-    
-    if (use.entropy | remove.indels) x <- x[!grepl("\\+|\\-", rownames(x)),]
-    
-    if (not.fix) x[x == 0 | x == 1] <- NA 
-
-    if (abs.diff) {
-      d.x <- apply(x, 1, diff) %>%
-        abs() %>%
-        t() %>% as.data.frame()
-    } else d.x <- apply(x, 1, diff) %>%
-        t() %>% as.data.frame()
-    
-    if (all(is.na(d.x))) next
-    if (use.entropy) x <- x %>% mutate_all(function(y) {
-      
-      lapply(y, function(z) {
-        if (is.na(z)) return(z)
-        shannon.entropy(c(z, 1 - z))
-      })
-    })
-    
-    if (use.quasi.entropy) x <- x %>% mutate_all(function(y) {
-      
-      lapply(y, function(z) {
-        if (is.na(z)) return(z)
-        -z * log(z, 2)
-      })
-    })
-
-    if (return.mean) {
-      
-      mean_sd <- data.frame(mean = rowMeans(x),
-                            sd = rowMeans(d.x ** 2))
-      
-      mean_sd <- mean_sd[mean_sd$mean != 0 & mean_sd$sd != 0,]
-      
-      log_log.mean_sd <- log(mean_sd)
-      lm.log_log.mean_sd <- lm(sd ~ mean, data = log_log.mean_sd)
-      fit.summary <- summary(lm.log_log.mean_sd)
-      
-      
-      params.tb[nrow(params.tb) + 1,] <- list(m, fit.summary$coefficients[1] %>% exp(),
-                                             fit.summary$coefficients[2],
-                                             fit.summary$r.squared,
-                                             x %>% ncol(),
-                                             log_log.mean_sd %>% nrow(),
-                                             coop::sparsity(x %>% as.matrix()),
-                                             "LLR")
-      log_log.mean_sd.lst[[m]] <- log_log.mean_sd
-      lm.lst[[m]] <- lm.log_log.mean_sd
-    
-    } else {
-      
-      # keep mean as value for compatibility with other functions
-      
-      if (next.point) x <- x[1:(length(x) - 1)]
-      else x <- x[2:length(x)]
-
-      v_sd <- data.frame(mean = stack(x)$values,
-                         sd = stack(d.x)$values,
-                         name = rownames(x))
-      
-      v_sd <- v_sd[v_sd$mean != 0 & v_sd$sd != 0 & !is.na(v_sd$sd),]
-      
-      if (logt) v_sd <- log(v_sd[c("mean", "sd")]) %>% cbind(v_sd["name"])
-      
-      lm.fit <- lm(sd ~ mean, data = v_sd)
-      fit.summary <- summary(lm.fit)
-      
-      params.tb[nrow(params.tb) + 1,] <- list(m, fit.summary$coefficients[1] %>% exp(),
-                                              fit.summary$coefficients[2],
-                                              fit.summary$r.squared,
-                                              x %>% ncol(),
-                                              v_sd %>% nrow(),
-                                              0,#coop::sparsity(x %>% as.matrix()),
-                                              "LLR")
-      log_log.mean_sd.lst[[m]] <- v_sd
-      lm.lst[[m]] <- lm.fit
-      
-    }  
-  }
-  return(list(params = params.tb,
-              log_log.mean_sd = log_log.mean_sd.lst,
-              lm.log_log.mean_sd = lm.lst))
-}
